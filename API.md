@@ -503,3 +503,44 @@ GET /v1/files/read?path=report.md
 | 文件覆盖 | 自动覆盖 | 需设置 `overwrite=true` |
 | 返回内容 | SSE 流 + 保存提示 | 文件路径、大小、预览 |
 | 适用场景 | 边看边存 | 只存不看 |
+
+---
+
+### GET /v1/sync/pending
+
+查看待同步的文件列表（sandbox 限制导致无法直接写入目标目录时使用）。
+
+**请求参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| 无 | - | - |
+
+**响应示例**：
+
+```json
+{
+  "workspace": "d:\\_program\\Trae\\zx-test\\output",
+  "sync_dir": "D:\\zProject\\test-trae-cn",
+  "pending_files": [
+    {
+      "src": "d:\\_program\\Trae\\zx-test\\output\\report.md",
+      "dest": "D:\\zProject\\test-trae-cn\\report.md",
+      "rel": "report.md"
+    }
+  ],
+  "count": 1
+}
+```
+
+### POST /v1/sync/clear
+
+清除待同步文件列表。
+
+**响应示例**：
+
+```json
+{
+  "cleared": 3
+}
+```

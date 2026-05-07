@@ -48,8 +48,11 @@ API_KEY=trae-local-api-key
 # 服务端口
 PORT=9900
 
-# 默认工作区目录
-WORKSPACE_DIR=d:\_program\Trae
+# 默认工作区目录（sandbox 允许的路径）
+WORKSPACE_DIR=d:\_program\Trae\zx-test\output
+
+# 输出同步目录（sandbox 限制时，文件先保存到 WORKSPACE_DIR，再同步到此目录）
+# OUTPUT_SYNC_DIR=D:\zProject\test-trae-cn
 
 # 代理设置（可选）
 # HTTP_PROXY=http://localhost:7891
@@ -240,6 +243,29 @@ curl http://localhost:9900/v1/files -H "Authorization: Bearer trae-local-api-key
 curl "http://localhost:9900/v1/files/read?path=server.py" -H "Authorization: Bearer trae-local-api-key"
 ```
 
+### 文件同步（Sandbox 限制解决方案）
+
+如果在 Trae IDE 内部运行 API 服务器，sandbox 安全策略会限制文件写入范围。此时需要配置输出同步：
+
+1. 在 `.env` 中设置：
+```env
+WORKSPACE_DIR=d:\_program\Trae\zx-test\output
+OUTPUT_SYNC_DIR=D:\zProject\test-trae-cn
+```
+
+2. API 服务器会将文件保存到 `WORKSPACE_DIR`（sandbox 允许的路径）
+3. 如果同步到 `OUTPUT_SYNC_DIR` 失败（sandbox 限制），文件会加入待同步队列
+4. 运行同步脚本将文件复制到目标目录：
+
+```bash
+sync-output.bat
+```
+
+5. 也可以通过 API 查看待同步文件：
+```bash
+curl http://localhost:9900/v1/sync/pending -H "Authorization: Bearer trae-local-api-key"
+```
+
 ## 可用模型
 
 | 模型名称 | 类型 | 说明 |
@@ -290,12 +316,24 @@ curl "http://localhost:9900/v1/files/read?path=server.py" -H "Authorization: Bea
 
 ### 手动获取 CN 版 Token
 
-如果自动认证失败（CN 版加密存储），可以手动提取：
+如果自动认证失败（CN 版加密存储），可以使用自动提取脚本：
+
+```bash
+# 方式一：运行批处理脚本
+extract-token.bat
+
+# 方式二：直接运行 Node.js 脚本
+node scripts\log-analysis\extract-completion-jwt.js
+```
+
+脚本会自动从 Trae IDE 的 completion 日志中提取 JWT token 并保存到 `.env` 文件。
+
+也可以手动提取：
 
 1. 打开 Trae IDE 并登录
-2. 找到 ai-agent 进程日志（通常在 `%TEMP%` 目录下）
-3. 搜索日志中的 JWT token
-4. 将 token 写入 `.env` 文件
+2. 找到 completion 日志：`%APPDATA%\Trae\logs\<最新日期>\window1\exthost\trae.ai-code-completion\completion.log`
+3. 搜索日志中的 `Cloud-IDE-JWT` 关键字
+4. 将 token 写入 `.env` 文件的 `TRAE_MANUAL_TOKEN` 字段
 
 ## 项目结构
 
@@ -323,6 +361,9 @@ zx-test/
 ├── data/                  # 数据文件（模型配置 JSON）
 ├── api-test.bat           # API 测试工具（含文件生成功能）
 ├── api-test-advanced.bat  # 高级 API 测试工具
+├── extract-token.bat      # Token 自动提取工具
+├── sync-output.bat        # 输出文件同步工具（sandbox 限制解决方案）
+├── output/                # AI 输出文件目录（sandbox 允许的路径）
 ├── .env                   # 环境变量配置
 ├── package.json           # 项目依赖
 ├── README.md              # 本文档

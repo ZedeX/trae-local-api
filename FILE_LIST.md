@@ -20,6 +20,7 @@ zx-test/
 │   ├── misc-test/          # 其他测试脚本
 │   └── model-test/         # 模型选择测试脚本
 ├── data/                   # 数据文件（JSON 配置等）
+├── output/                 # AI 输出文件目录（sandbox 允许的路径）
 ├── docs/                   # 文档
 ├── api-test.bat            # 简单版 API 测试工具
 ├── api-test-advanced.bat   # 高级版 API 测试工具
@@ -108,6 +109,8 @@ zx-test/
 | `decrypt-v2.ps1` | PowerShell 版解密 v2 |
 | `decrypt-node.js` | Node.js 版解密尝试 |
 | `decrypt-safestorage.js` | Electron safeStorage 解密 |
+| `decrypt-tc-auth.ps1` | PowerShell 版 `tc` 格式认证数据解密 |
+| `dpapi-decrypt-key.ps1` | PowerShell 版 DPAPI 密钥解密（接受 Base64 参数） |
 | `analyze-encrypt.js` | 分析加密格式和算法 |
 | `check-cn-auth.js` | 检查 CN 版认证数据格式 |
 | `check-cn-storage.js` | 检查 CN 版存储文件结构 |
@@ -188,8 +191,14 @@ zx-test/
 | `analyze-latest-log.js` / `v2` | 分析最新的日志文件 |
 | `extract-token.js` / `extract-latest-token.js` | 从日志中提取 JWT token |
 | `extract-latest-jwt.js` | 从 ai-agent 日志中提取最新 JWT 并自动写入 .env |
+| `extract-completion-jwt.js` | 从 completion 日志中提取 JWT token 并自动写入 .env（推荐） |
 | `get-latest-token.js` / `v2` | 获取最新有效的 token |
 | `check-ipc-mechanism.js` | 检查 IPC 通信机制 |
+| `find-token-v2.js` | 多方法搜索 Trae token（日志、IPC、LevelDB） |
+| `find-devtools.js` | 搜索 Trae DevTools 调试端口 |
+| `decrypt-tc-node.js` | 尝试解密 `tc` 格式的加密认证数据（Node.js 版） |
+| `decrypt-tc-v2.js` | 解密 `tc` 格式 v2，尝试多种 nonce 偏移量 |
+| `decrypt-tc-v3.js` | 解密 `tc` 格式 v3，详细字节分析 |
 
 ---
 
@@ -238,6 +247,8 @@ zx-test/
 |------|------|
 | `api-test.bat` | API 测试工具，支持对话、文件生成（`/v1/chat/file`）、流式+保存（`save_to`）、工作区文件管理、模型列表、加解密等 |
 | `api-test-advanced.bat` | 高级版 API 测试工具，支持多轮对话、模型选择、函数选择等 |
+| `extract-token.bat` | Token 自动提取工具，从 Trae IDE 日志中提取 JWT token 并保存到 .env |
+| `sync-output.bat` | 输出文件同步工具，将 sandbox 内的输出文件同步到外部目录 |
 
 ---
 

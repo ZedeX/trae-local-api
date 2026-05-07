@@ -17,6 +17,25 @@ app.use(express.json({ limit: '10mb' }));
 const API_KEY = process.env.API_KEY || 'trae-local-api-key';
 const PORT = process.env.PORT || 9900;
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '';
+const OUTPUT_SYNC_DIR = process.env.OUTPUT_SYNC_DIR || '';
+
+const pendingSyncFiles = [];
+
+function syncFileToOutput(srcPath) {
+  if (!OUTPUT_SYNC_DIR) return;
+  try {
+    const relPath = path.relative(WORKSPACE_DIR, srcPath);
+    if (relPath.startsWith('..')) return;
+    const destPath = path.join(OUTPUT_SYNC_DIR, relPath);
+    const destDir = path.dirname(destPath);
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    fs.copyFileSync(srcPath, destPath);
+    console.log(`[sync] ${srcPath} -> ${destPath}`);
+  } catch (e) {
+    console.log(`[sync] Queued for external sync: ${srcPath}`);
+    pendingSyncFiles.push(srcPath);
+  }
+}
 
 function authenticate(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -78,6 +97,7 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(saveToPath, fullContent, 'utf-8');
             console.log(`[file] Saved to: ${saveToPath}`);
+            syncFileToOutput(saveToPath);
             const savedChunk = createOpenAIStreamChunk(completionId, modelName, {
               content: `\n\n[File saved: ${saveToPath}]`
             }, null);
@@ -342,6 +362,7 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
             if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
             fs.writeFileSync(saveToPath, fullContent, 'utf-8');
             console.log(`[file] Saved to: ${saveToPath}`);
+            syncFileToOutput(saveToPath);
             response.saved_to = saveToPath;
           } catch (fileErr) {
             console.error(`[file] Save failed: ${fileErr.message}`);
@@ -587,6 +608,7 @@ app.post('/v1/chat/file', authenticate, async (req, res) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(saveToPath, fullContent, 'utf-8');
     console.log(`[file] Saved to: ${saveToPath} (${fullContent.length} chars)`);
+    syncFileToOutput(saveToPath);
 
     const usage = tokenUsage ? {
       prompt_tokens: tokenUsage.prompt_tokens || 0,
@@ -705,10 +727,33 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/v1/sync/pending', authenticate, (req, res) => {
+  res.json({
+    workspace: WORKSPACE_DIR,
+    sync_dir: OUTPUT_SYNC_DIR || null,
+    pending_files: pendingSyncFiles.map(f => ({
+      src: f,
+      dest: OUTPUT_SYNC_DIR ? path.join(OUTPUT_SYNC_DIR, path.relative(WORKSPACE_DIR, f)) : null,
+      rel: path.relative(WORKSPACE_DIR, f),
+    })),
+    count: pendingSyncFiles.length,
+  });
+});
+
+app.post('/v1/sync/clear', authenticate, (req, res) => {
+  const cleared = pendingSyncFiles.length;
+  pendingSyncFiles.length = 0;
+  res.json({ cleared });
+});
+
 app.listen(PORT, () => {
   console.log(`\n[Trae Local API] Server running on http://localhost:${PORT}`);
   console.log(`[Trae Local API] API Key: ${API_KEY}`);
   console.log(`[Trae Local API] Primary endpoint: llm_utils_chat (inline_chat)`);
   console.log(`[Trae Local API] Available functions: ${Object.keys(FUNCTION_MAP).join(', ')}`);
-  console.log(`[Trae Local API] Workspace dir: ${WORKSPACE_DIR || 'not set'}\n`);
+  console.log(`[Trae Local API] Workspace dir: ${WORKSPACE_DIR || 'not set'}`);
+  if (OUTPUT_SYNC_DIR) {
+    console.log(`[Trae Local API] Output sync dir: ${OUTPUT_SYNC_DIR}`);
+  }
+  console.log('');
 });

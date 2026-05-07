@@ -114,18 +114,40 @@ function getAuthInfo() {
   if (manualToken && manualToken.startsWith('eyJ')) {
     console.log('[auth] Using manual token from TRAE_MANUAL_TOKEN env');
     const apiHost = process.env.TRAE_API_HOST || 'https://trae-api-cn.mchost.guru';
-    return {
-      token: manualToken,
-      refreshToken: null,
-      expiredAt: null,
-      refreshExpiredAt: null,
-      tokenReleaseAt: null,
-      userId: null,
-      host: apiHost,
-      userRegion: null,
-      account: null,
-      _edition: 'manual'
-    };
+    try {
+      const parts = manualToken.split('.');
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      const expMs = payload.exp * 1000;
+      const isExpired = Date.now() > expMs;
+      if (isExpired) {
+        console.log('[auth] Manual token is expired, exp:', new Date(expMs).toISOString());
+      }
+      return {
+        token: manualToken,
+        refreshToken: null,
+        expiredAt: new Date(expMs).toISOString(),
+        refreshExpiredAt: null,
+        tokenReleaseAt: null,
+        userId: payload.data?.id || null,
+        host: apiHost,
+        userRegion: null,
+        account: null,
+        _edition: 'manual'
+      };
+    } catch (e) {
+      return {
+        token: manualToken,
+        refreshToken: null,
+        expiredAt: null,
+        refreshExpiredAt: null,
+        tokenReleaseAt: null,
+        userId: null,
+        host: apiHost,
+        userRegion: null,
+        account: null,
+        _edition: 'manual'
+      };
+    }
   }
 
   throw new Error('No readable auth info found in any edition. CN edition data is encrypted and SG edition data is not available.');
@@ -239,6 +261,14 @@ async function exchangeToken(refreshToken) {
 
 async function refreshTokenIfNeeded() {
   const authInfo = getAuthInfo();
+
+  if (authInfo._edition === 'manual') {
+    if (!isTokenExpired(authInfo)) {
+      return authInfo;
+    }
+    throw new Error('Manual token expired. Please update TRAE_MANUAL_TOKEN in .env file.');
+  }
+
   if (!isTokenExpiringSoon(authInfo, 30)) {
     return authInfo;
   }
