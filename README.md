@@ -14,6 +14,8 @@
 - **代理支持** - 支持 HTTP/SOCKS5 代理，适配各种网络环境
 - **加解密功能** - 内置 AES-256-GCM 加解密，保护敏感数据
 - **项目目录配置** - 支持配置默认工作区目录
+- **文件输出** - AI 回复可直接保存到硬盘文件，支持生成 MD/HTML/代码等文件
+- **工作区文件管理** - 支持列出和读取工作区目录中的文件
 
 ## 快速开始
 
@@ -194,6 +196,50 @@ while (true) {
 }
 ```
 
+### 文件输出
+
+**方式一：专用文件生成端点**（推荐，AI 生成内容直接保存到硬盘）：
+
+```bash
+curl -s http://localhost:9900/v1/chat/file \
+  -H "Authorization: Bearer trae-local-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "Write a Python HTTP server example"}],
+    "filename": "server.py",
+    "overwrite": true
+  }'
+```
+
+响应返回文件保存路径和内容预览，文件直接写入 `WORKSPACE_DIR` 目录。
+
+**方式二：流式对话 + 保存**（边看边存）：
+
+```bash
+curl -N http://localhost:9900/v1/chat/completions \
+  -H "Authorization: Bearer trae-local-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "Write a markdown report about AI trends"}],
+    "stream": true,
+    "save_to": "ai-report.md"
+  }'
+```
+
+流式输出正常显示，同时内容自动保存到 `WORKSPACE_DIR/ai-report.md`。
+
+**管理工作区文件**：
+
+```bash
+# 列出工作区文件
+curl http://localhost:9900/v1/files -H "Authorization: Bearer trae-local-api-key"
+
+# 读取文件内容
+curl "http://localhost:9900/v1/files/read?path=server.py" -H "Authorization: Bearer trae-local-api-key"
+```
+
 ## 可用模型
 
 | 模型名称 | 类型 | 说明 |
@@ -256,19 +302,34 @@ while (true) {
 ```
 zx-test/
 ├── src/
-│   ├── server.js          # Express 服务器，OpenAI 兼容端点
+│   ├── server.js          # Express 服务器，OpenAI 兼容端点 + 文件输出 + 文件管理
 │   ├── trae-client.js     # Trae API 客户端，核心通信逻辑
-│   ├── auth.js            # 认证管理，token 提取与刷新
+│   ├── auth.js            # 认证管理，token 提取与刷新 + 手动 token 支持
 │   ├── openai-format.js   # 响应格式转换，SSE 解析
 │   ├── crypto.js          # AES-256-GCM 加解密
 │   └── uuid.js            # UUID 生成
-├── test-api-server.js     # API 服务器端到端测试
+├── scripts/               # 各类测试和分析脚本（按功能分类）
+│   ├── capture/           # 网络抓包脚本
+│   ├── chat-test/         # 对话功能测试
+│   ├── cn-api-test/       # CN 版 API 测试
+│   ├── decrypt/           # 加解密分析
+│   ├── dll-analysis/      # DLL 逆向分析
+│   ├── endpoint-test/     # API 端点测试
+│   ├── ffi-test/          # FFI/IPC 测试
+│   ├── format-test/       # 消息格式测试
+│   ├── log-analysis/      # 日志分析
+│   ├── misc-test/         # 其他测试（含文件输出测试）
+│   └── model-test/        # 模型选择测试
+├── data/                  # 数据文件（模型配置 JSON）
+├── api-test.bat           # API 测试工具（含文件生成功能）
+├── api-test-advanced.bat  # 高级 API 测试工具
 ├── .env                   # 环境变量配置
 ├── package.json           # 项目依赖
 ├── README.md              # 本文档
 ├── ARCHITECTURE.md        # 架构设计文档
 ├── API.md                 # API 接口文档
-└── PROGRESS.md            # 项目进展文档
+├── PROGRESS.md            # 项目进展文档
+└── FILE_LIST.md           # 文件清单
 ```
 
 ## 常见问题

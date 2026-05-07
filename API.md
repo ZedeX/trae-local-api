@@ -30,6 +30,7 @@ OpenAI 兼容的对话补全接口。
 | `function` | string | 否 | Trae 函数类型，默认根据 model 自动选择 |
 | `config_name` | string | 否 | 模型配置名称，默认根据 model 自动选择 |
 | `workspace_dir` | string | 否 | 工作区目录 |
+| `save_to` | string | 否 | 将 AI 回复内容保存到文件（相对路径基于 WORKSPACE_DIR，绝对路径直接使用） |
 | `temperature` | number | 否 | 温度参数（当前未传递给后端） |
 | `max_tokens` | number | 否 | 最大 token 数（当前未传递给后端） |
 
@@ -336,3 +337,169 @@ GET /v1/models/detail?function=chat_v3
 | `temperature` | 支持 | 当前未传递给后端 |
 | `max_tokens` | 支持 | 当前未传递给后端 |
 | `tools` / `function_call` | 支持 | 当前未支持 |
+| `save_to` 参数 | 不支持 | 支持（流式保存到文件） |
+| `/v1/chat/file` | 不支持 | 支持（专用文件生成端点） |
+| `/v1/files` | 不支持 | 支持（工作区文件管理） |
+
+---
+
+### POST /v1/chat/file
+
+专用文件生成端点。AI 生成内容后直接保存到硬盘文件，返回 JSON 结果（非流式）。
+
+**请求体**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `messages` | array | 是 | 消息列表，格式同 OpenAI |
+| `filename` | string | 是 | 输出文件名（如 `"report.md"`、`"page.html"`），相对路径基于 WORKSPACE_DIR |
+| `model` | string | 否 | 模型名称，默认 `"auto"` |
+| `function` | string | 否 | Trae 函数类型 |
+| `workspace_dir` | string | 否 | 工作区目录，默认使用 .env 中的 WORKSPACE_DIR |
+| `overwrite` | boolean | 否 | 是否覆盖已存在的文件，默认 `false` |
+
+**请求示例**：
+
+```json
+{
+  "model": "auto",
+  "messages": [
+    { "role": "user", "content": "Write a markdown report about Python best practices" }
+  ],
+  "filename": "python-report.md",
+  "overwrite": true
+}
+```
+
+**成功响应**：
+
+```json
+{
+  "id": "chatcmpl-xxx",
+  "object": "chat.completion.file",
+  "created": 1778172000,
+  "model": "auto",
+  "filename": "python-report.md",
+  "saved_to": "D:\\zProject\\test-trae-cn\\python-report.md",
+  "file_size": 2048,
+  "content_preview": "# Python Best Practices\n\n...",
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 50,
+    "completion_tokens": 500,
+    "total_tokens": 550
+  }
+}
+```
+
+**文件已存在响应**（HTTP 409）：
+
+```json
+{
+  "error": {
+    "message": "File already exists: D:\\zProject\\test-trae-cn\\report.md. Set overwrite=true to replace.",
+    "type": "file_exists",
+    "path": "D:\\zProject\\test-trae-cn\\report.md"
+  }
+}
+```
+
+**使用场景**：
+
+- 生成 Markdown 文档
+- 生成 HTML 页面
+- 生成代码文件
+- 生成配置文件
+- 任何需要将 AI 输出保存为文件的场景
+
+---
+
+### GET /v1/files
+
+列出工作区目录中的文件。
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `workspace_dir` | string | 否 | 工作区目录，默认使用 .env 中的 WORKSPACE_DIR |
+
+**响应**：
+
+```json
+{
+  "workspace": "D:\\zProject\\test-trae-cn",
+  "files": [
+    { "name": "report.md", "path": "report.md", "size": 2048, "modified": "2026-05-08T10:00:00.000Z" },
+    { "name": "page.html", "path": "page.html", "size": 4096, "modified": "2026-05-08T10:05:00.000Z" }
+  ],
+  "total": 2
+}
+```
+
+---
+
+### GET /v1/files/read
+
+读取工作区中的文件内容。
+
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `path` | string | 是 | 文件路径（相对于工作区目录） |
+| `workspace_dir` | string | 否 | 工作区目录，默认使用 .env 中的 WORKSPACE_DIR |
+
+**请求示例**：
+
+```
+GET /v1/files/read?path=report.md
+```
+
+**响应**：
+
+```json
+{
+  "path": "report.md",
+  "full_path": "D:\\zProject\\test-trae-cn\\report.md",
+  "size": 2048,
+  "content": "# Report\n\nThis is the content..."
+}
+```
+
+---
+
+### save_to 参数（/v1/chat/completions）
+
+在 `/v1/chat/completions` 端点中添加 `save_to` 参数，可以在流式输出的同时将完整内容保存到文件。
+
+**使用方式**：
+
+```json
+{
+  "model": "auto",
+  "messages": [
+    { "role": "user", "content": "Write a summary of AI trends" }
+  ],
+  "stream": true,
+  "save_to": "ai-summary.md"
+}
+```
+
+**行为说明**：
+
+- 流式输出正常进行（客户端可以实时看到内容）
+- 流结束后，完整内容自动保存到指定文件
+- 保存成功后，流中会追加一条提示：`[File saved: D:\zProject\test-trae-cn\ai-summary.md]`
+- 保存失败时，流中会追加错误提示：`[File save failed: ...]`
+- `save_to` 支持相对路径（基于 WORKSPACE_DIR）和绝对路径
+
+**与 /v1/chat/file 的区别**：
+
+| 特性 | `/v1/chat/completions` + `save_to` | `/v1/chat/file` |
+|------|--------------------------------------|-----------------|
+| 响应方式 | 流式（SSE） | JSON（非流式） |
+| 实时查看 | 可以 | 不可以 |
+| 文件覆盖 | 自动覆盖 | 需设置 `overwrite=true` |
+| 返回内容 | SSE 流 + 保存提示 | 文件路径、大小、预览 |
+| 适用场景 | 边看边存 | 只存不看 |

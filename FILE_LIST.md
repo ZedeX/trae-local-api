@@ -33,9 +33,9 @@ zx-test/
 
 | 文件 | 作用 |
 |------|------|
-| `server.js` | Express 服务器主入口，实现 OpenAI 兼容的 `/v1/chat/completions` 端点，支持流式/非流式响应、模型选择、加解密等 |
+| `server.js` | Express 服务器主入口，实现 OpenAI 兼容的 `/v1/chat/completions` 端点，支持流式/非流式响应、模型选择、加解密、文件输出（`save_to` 参数和 `/v1/chat/file` 端点）、工作区文件管理（`/v1/files`、`/v1/files/read`）等 |
 | `trae-client.js` | Trae API 客户端，核心通信逻辑。包含 `llmUtilsChat`、`chatCompletion`、`createAgentTask` 三个端点的调用，以及指数退避重试、模型自动映射等 |
-| `auth.js` | 认证管理模块，从 Trae IDE 存储中提取 JWT token，支持 CN/SG 双版本，自动检测 token 过期并刷新 |
+| `auth.js` | 认证管理模块，从 Trae IDE 存储中提取 JWT token，支持 CN/SG 双版本，自动检测 token 过期并刷新，支持 `TRAE_MANUAL_TOKEN` 环境变量手动设置 token |
 | `openai-format.js` | 响应格式转换模块，将 Trae 后端的 SSE 事件流解析并转换为 OpenAI 兼容格式，包含调试信息过滤 |
 | `crypto.js` | AES-256-GCM 加解密工具，提供 `/v1/encrypt` 和 `/v1/decrypt` 端点的底层实现 |
 | `uuid.js` | UUID v4 生成工具 |
@@ -187,6 +187,7 @@ zx-test/
 | `read-agent-log.js` ~ `v14.js` | 逐步迭代读取和分析 ai-agent 日志 |
 | `analyze-latest-log.js` / `v2` | 分析最新的日志文件 |
 | `extract-token.js` / `extract-latest-token.js` | 从日志中提取 JWT token |
+| `extract-latest-jwt.js` | 从 ai-agent 日志中提取最新 JWT 并自动写入 .env |
 | `get-latest-token.js` / `v2` | 获取最新有效的 token |
 | `check-ipc-mechanism.js` | 检查 IPC 通信机制 |
 
@@ -214,6 +215,7 @@ zx-test/
 | 文件 | 作用 |
 |------|------|
 | `test-api-server.js` | 端到端 API 服务器测试（41 项测试，当前使用的主测试脚本） |
+| `test-file-output.js` | 文件输出功能测试，测试 `/v1/chat/file`、`save_to` 参数和文件管理端点 |
 | `test-api-full.js` | 完整 API 测试 |
 | `test-api.js` | 基础 API 测试 |
 | `test-api-old.js` | 旧版 API 测试 |
@@ -234,7 +236,7 @@ zx-test/
 
 | 文件 | 作用 |
 |------|------|
-| `api-test.bat` | 简单版 API 测试工具，支持状态检查、模型列表、对话、加解密等 |
+| `api-test.bat` | API 测试工具，支持对话、文件生成（`/v1/chat/file`）、流式+保存（`save_to`）、工作区文件管理、模型列表、加解密等 |
 | `api-test-advanced.bat` | 高级版 API 测试工具，支持多轮对话、模型选择、函数选择等 |
 
 ---
