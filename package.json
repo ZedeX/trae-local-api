@@ -1,0 +1,21 @@
+{
+  "name": "trae-local-api",
+  "version": "1.0.0",
+  "description": "Trae IDE Local API Wrapper - OpenAI Compatible Interface",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node scripts/misc-test/test-api-server.js"
+  },
+  "dependencies": {
+    "axios": "^1.16.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "https-proxy-agent": "^9.0.0",
+    "koffi": "^2.16.2",
+    "node-fetch": "^2.7.0",
+    "socks-proxy-agent": "^10.0.0"
+  }
+}
