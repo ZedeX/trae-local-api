@@ -62,7 +62,7 @@ function getLogDir() {
  */
 function nextReqNumber() {
   dailyCounter++;
-  return String(dailyCounter).padStart(3, '0');
+  return String(dailyCounter).padStart(6, '0');
 }
 
 /**

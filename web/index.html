@@ -223,6 +223,7 @@ a{color:var(--accent-1);text-decoration:none}
       </button>
       <span class="brand">Trae API Studio</span>
       <span class="badge badge-purple" id="editionBadge"></span>
+      <span class="badge badge-green" id="autoContinueBadge" style="display:none">Auto-Continue</span>
       <span style="flex:1"></span>
       <span class="status-text" id="modelInfo"></span>
       <button class="btn btn-ghost btn-sm" onclick="checkStatus()" title="Refresh Status">
@@ -401,6 +402,20 @@ a{color:var(--accent-1);text-decoration:none}
             </div>
           </div>
           <div class="config-section">
+            <h3>Auto-Continue</h3>
+            <div class="config-field">
+              <label>Auto-Continue</label>
+              <select id="cfgAutoContinue">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </div>
+            <div class="config-field">
+              <label>Max Continues</label>
+              <input id="cfgMaxContinues" type="number" value="5" min="1" max="20">
+            </div>
+          </div>
+          <div class="config-section">
             <h3>Session</h3>
             <div class="config-field">
               <label>Workspace Dir</label>
@@ -440,6 +455,8 @@ let state = {
     stream: true,
     maxRounds: 8,
     selectedTools: [],
+    autoContinue: true,
+    maxContinues: 5,
   },
   models: [],
   tools: [],
@@ -1083,6 +1100,24 @@ async function checkStatus() {
       text.textContent = 'Connected - ' + (json.edition || '');
       badge.textContent = json.edition || '';
       badge.style.display = '';
+
+      const acBadge = document.getElementById('autoContinueBadge');
+      if (json.auto_continue) {
+        acBadge.style.display = '';
+        acBadge.textContent = 'Auto-Continue (' + (json.max_continues || 5) + ')';
+      } else {
+        acBadge.style.display = 'none';
+      }
+
+      // Sync server config to UI
+      if (json.auto_continue !== undefined) {
+        document.getElementById('cfgAutoContinue').value = String(json.auto_continue);
+        state.config.autoContinue = json.auto_continue;
+      }
+      if (json.max_continues !== undefined) {
+        document.getElementById('cfgMaxContinues').value = json.max_continues;
+        state.config.maxContinues = json.max_continues;
+      }
     } else {
       dot.className = 'status-dot';
       text.textContent = 'Error';
@@ -1194,6 +1229,8 @@ function syncConfigFromUI() {
   state.config.model = document.getElementById('cfgModel').value;
   state.config.stream = document.getElementById('cfgStream').value === 'true';
   state.config.maxRounds = parseInt(document.getElementById('cfgMaxRounds').value) || 8;
+  state.config.autoContinue = document.getElementById('cfgAutoContinue').value === 'true';
+  state.config.maxContinues = parseInt(document.getElementById('cfgMaxContinues').value) || 5;
 
   const sess = getActiveSession();
   if (sess) {
@@ -1209,6 +1246,8 @@ function syncUIFromConfig() {
   document.getElementById('cfgModel').value = state.config.model;
   document.getElementById('cfgStream').value = state.config.stream ? 'true' : 'false';
   document.getElementById('cfgMaxRounds').value = state.config.maxRounds;
+  document.getElementById('cfgAutoContinue').value = state.config.autoContinue ? 'true' : 'false';
+  document.getElementById('cfgMaxContinues').value = state.config.maxContinues || 5;
 
   const sess = getActiveSession();
   if (sess) {
@@ -1228,7 +1267,7 @@ function init() {
   addKvRow('apiHeadersEditor');
   addKvRow('apiParamsEditor');
 
-  document.querySelectorAll('#cfgApiBase,#cfgApiKey,#cfgModel,#cfgStream,#cfgMaxRounds,#cfgWorkspace,#cfgSystemPrompt').forEach(el => {
+  document.querySelectorAll('#cfgApiBase,#cfgApiKey,#cfgModel,#cfgStream,#cfgMaxRounds,#cfgAutoContinue,#cfgMaxContinues,#cfgWorkspace,#cfgSystemPrompt').forEach(el => {
     el.addEventListener('change', syncConfigFromUI);
     el.addEventListener('input', debounce(syncConfigFromUI, 500));
   });

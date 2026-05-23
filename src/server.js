@@ -565,6 +565,8 @@ app.get('/v1/status', authenticate, async (req, res) => {
       api_host: apiHost,
       account: authInfo.account?.username,
       workspace_dir: WORKSPACE_DIR,
+      auto_continue: AUTO_CONTINUE,
+      max_continues: MAX_CONTINUES,
       device_ids: {
         machine_id: deviceIds.machineId ? deviceIds.machineId.substring(0, 8) + '...' : 'N/A'
       }
