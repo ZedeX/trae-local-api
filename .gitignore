@@ -36,5 +36,5 @@ scripts/
 .DS_Store
 Thumbs.db
 
-# Build
-dist/
+# Data files (contain encrypted model params with account-bound credentials)
+data/
