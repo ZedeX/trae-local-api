@@ -429,6 +429,8 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       toolCallBuffer: '',     // buffer for detecting <toolcall> tags in text stream
       inToolCall: false,      // currently inside a <toolcall> tag
       pendingToolCalls: [],   // extracted tool calls waiting to be emitted
+      suppressStopEvents: false, // if true, don't emit message_delta/message_stop (for auto-continue)
+      stopReason: null,       // last stop reason from done event
     };
   }
 
@@ -814,15 +816,19 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
     } else if (chunk.finish_reason === 'max_tokens') {
       stopReason = 'max_tokens';
     }
+    state.stopReason = stopReason;
 
-    events.push({
-      event: 'message_delta',
-      data: createAnthropicMessageDelta(stopReason, { output_tokens: state.outputTokenCount })
-    });
-    events.push({
-      event: 'message_stop',
-      data: createAnthropicStreamEvent('message_stop', {})
-    });
+    // Only emit message_delta and message_stop if not suppressed (auto-continue may suppress these)
+    if (!state.suppressStopEvents) {
+      events.push({
+        event: 'message_delta',
+        data: createAnthropicMessageDelta(stopReason, { output_tokens: state.outputTokenCount })
+      });
+      events.push({
+        event: 'message_stop',
+        data: createAnthropicStreamEvent('message_stop', {})
+      });
+    }
     state.messageStopped = true;
   }
 

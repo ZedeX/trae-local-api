@@ -31,8 +31,54 @@ const API_KEY = process.env.API_KEY || 'trae-local-api-key';
 const PORT = process.env.PORT || 19900;
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '';
 const OUTPUT_SYNC_DIR = process.env.OUTPUT_SYNC_DIR || '';
+const AUTO_CONTINUE = process.env.AUTO_CONTINUE !== 'false'; // default true
+const MAX_CONTINUES = parseInt(process.env.MAX_CONTINUES || '5', 10);
 
 const pendingSyncFiles = [];
+
+/**
+ * Detect if the model response was truncated and should be auto-continued.
+ * Returns true if the response seems incomplete.
+ */
+function isResponseTruncated(state) {
+  if (!state || !state.messageStarted) return false;
+
+  // If stop_reason is tool_use, the model intentionally stopped to call a tool - don't continue
+  if (state.hasToolUse) return false;
+
+  // If stop_reason is max_tokens, definitely truncated
+  if (state.stopReason === 'max_tokens') return true;
+
+  // Check for incomplete text patterns
+  const text = state.textContent || '';
+  if (!text) return false;
+
+  // Open code block (``` without closing ```)
+  const codeBlockOpens = (text.match(/```/g) || []).length;
+  if (codeBlockOpens % 2 !== 0) return true;
+
+  // Unclosed brackets/braces/parens at the end (common in code output)
+  const last100 = text.slice(-100).trim();
+  const openBrackets = (last100.match(/[\[{(]/g) || []).length;
+  const closeBrackets = (last100.match(/[\]})]/g) || []).length;
+  if (openBrackets > closeBrackets + 2) return true;
+
+  // Ends mid-sentence (common truncation patterns)
+  const truncatedEndings = [
+    /,\s*$/,           // trailing comma
+    /\|\s*$/,          // trailing pipe (table)
+    /\.\.\.\s*$/,      // ellipsis
+    /\\\s*$/,          // trailing backslash
+    /\/\/\s*$/,        // trailing comment
+    /#\s*$/,           // trailing hash comment
+    /-\s*$/,           // trailing dash (list item)
+  ];
+  for (const pattern of truncatedEndings) {
+    if (pattern.test(last100)) return true;
+  }
+
+  return false;
+}
 
 function syncFileToOutput(srcPath) {
   if (!OUTPUT_SYNC_DIR) return;
@@ -898,40 +944,47 @@ app.post('/v1/messages', authenticate, async (req, res) => {
       };
 
       let streamState = null;
-      let buffer = '';
-      let currentEventName = '';
-      const upstreamLogId = null; // will be set after llmUtilsChat
+      let continueCount = 0;
+      let currentMessages = [...openaiMessages]; // mutable copy for continue
 
-      try {
-        const result = await llmUtilsChat(openaiMessages, modelName, true, options);
-        const upstreamLogId = result.logId;
+      // Helper: process a single llmUtilsChat stream
+      const processStream = async (messages) => {
+        const result = await llmUtilsChat(messages, modelName, true, options);
+        const logId = result.logId;
 
-        if (result.body) {
+        if (!result.body) {
+          throw new Error('No stream body from llmUtilsChat');
+        }
+
+        return new Promise((resolve, reject) => {
+          let streamBuffer = '';
+          let streamEventName = '';
+
           result.body.on('data', (chunk) => {
             try {
-              buffer += chunk.toString();
-              const lines = buffer.split('\n');
-              buffer = lines.pop() || '';
+              streamBuffer += chunk.toString();
+              const lines = streamBuffer.split('\n');
+              streamBuffer = lines.pop() || '';
 
               for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
 
-                const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
+                const parsed = parseLlmUtilsChatStream(trimmed, streamEventName);
                 if (!parsed) continue;
 
                 if (parsed._type === 'event_name') {
-                  currentEventName = parsed.value;
-                  if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, null);
+                  streamEventName = parsed.value;
+                  if (logId) trafficLogger.logResponseChunk(logId, streamEventName, null);
                   continue;
                 }
 
-                if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, parsed);
-                if (upstreamLogId && parsed.type === 'text' && parsed.content) {
-                  trafficLogger.logResponseContent(upstreamLogId, parsed.content, parsed.reasoning);
+                if (logId) trafficLogger.logResponseChunk(logId, streamEventName, parsed);
+                if (logId && parsed.type === 'text' && parsed.content) {
+                  trafficLogger.logResponseContent(logId, parsed.content, parsed.reasoning);
                 }
-                if (upstreamLogId && parsed.type === 'token_usage') {
-                  trafficLogger.logTokenUsage(upstreamLogId, parsed.data);
+                if (logId && parsed.type === 'token_usage') {
+                  trafficLogger.logTokenUsage(logId, parsed.data);
                 }
 
                 // Send keep-alive ping for progress events
@@ -949,7 +1002,6 @@ app.post('/v1/messages', authenticate, async (req, res) => {
               }
             } catch (err) {
               console.error(`[anthropic ${reqId}] Error processing chunk:`, err);
-              // Try to gracefully close the stream
               if (!res.writableEnded && streamState && streamState.messageStarted && !streamState.messageStopped) {
                 try {
                   if (streamState.contentBlockIndex >= 0 && streamState.currentContentType !== null) {
@@ -960,66 +1012,116 @@ app.post('/v1/messages', authenticate, async (req, res) => {
                 } catch (closeErr) { /* ignore */ }
                 res.end();
               }
+              reject(err);
             }
           });
 
           result.body.on('end', () => {
-            const elapsed = Date.now() - startTime;
-            console.log(`[anthropic ${reqId}] stream body ended: ${elapsed}ms, messageStopped=${streamState?.messageStopped}, messageStarted=${streamState?.messageStarted}`);
-            if (upstreamLogId) trafficLogger.finalizeLog(upstreamLogId, {
+            if (logId) trafficLogger.finalizeLog(logId, {
               fullContent: streamState?.textContent || '',
               fullReasoning: streamState?.reasoningContent || '',
               tokenUsage: streamState?.outputTokenCount ? { completion_tokens: streamState.outputTokenCount } : null
             });
-            if (!res.writableEnded) {
-              // Only send closing events if message_stop hasn't been sent yet
-              // (llmUtilsChunkToAnthropic sends message_stop on 'done' event)
-              if (streamState && streamState.messageStopped) {
-                // message_stop already sent by done/error handler, just end the response
-                res.end();
-              } else if (streamState && streamState.messageStarted) {
-                // Stream ended without receiving 'done' - send closing events
-                if (streamState.contentBlockIndex >= 0) {
-                  sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
-                }
-                sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: streamState.outputTokenCount || 0 }));
-                sendEvent('message_stop', { type: 'message_stop' });
-                res.end();
-              } else {
-                // No content was received at all - send empty message
-                sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
-                sendEvent('content_block_start', createAnthropicContentBlockStart(0, 'text', { text: '' }));
-                sendEvent('content_block_stop', { type: 'content_block_stop', index: 0 });
-                sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: 0 }));
-                sendEvent('message_stop', { type: 'message_stop' });
-                res.end();
-              }
-            }
+            resolve();
           });
 
           result.body.on('error', (err) => {
-            console.error('[anthropic stream] error:', err);
-            if (!res.writableEnded) {
-              sendEvent('error', createAnthropicError({
-                type: 'api_error',
-                message: err.message
-              }));
-              res.end();
-            }
+            console.error(`[anthropic ${reqId}] stream error:`, err);
+            reject(err);
           });
 
           req.on('close', () => {
             const elapsed = Date.now() - startTime;
-            console.log(`[anthropic ${reqId}] client disconnected after ${elapsed}ms, messageStopped=${streamState?.messageStopped}`);
+            console.log(`[anthropic ${reqId}] client disconnected after ${elapsed}ms`);
             if (result.body && result.body.destroy) result.body.destroy();
+            reject(new Error('Client disconnected'));
           });
+        });
+      };
+
+      try {
+        // Main loop: process stream, auto-continue if truncated
+        while (continueCount <= MAX_CONTINUES) {
+          // Always suppress stop events from llmUtilsChunkToAnthropic
+          // We'll send them manually after checking if we need to continue
+          if (streamState) {
+            streamState.suppressStopEvents = true;
+          }
+
+          await processStream(currentMessages);
+
+          const elapsed = Date.now() - startTime;
+          console.log(`[anthropic ${reqId}] stream ended: ${elapsed}ms, stopReason=${streamState?.stopReason}, continueCount=${continueCount}`);
+
+          // Check if we should auto-continue
+          if (AUTO_CONTINUE && streamState && streamState.messageStopped && isResponseTruncated(streamState) && continueCount < MAX_CONTINUES) {
+            continueCount++;
+            console.log(`[anthropic ${reqId}] Response truncated (stopReason=${streamState.stopReason}), auto-continuing (${continueCount}/${MAX_CONTINUES})...`);
+
+            // Build continue messages
+            const assistantText = streamState.textContent || '';
+            currentMessages.push({ role: 'assistant', content: assistantText });
+            currentMessages.push({ role: 'user', content: '请继续输出，从你中断的地方继续。' });
+
+            // Reset streamState for the next iteration
+            const savedContentBlockIndex = streamState.contentBlockIndex;
+            const savedMessageStarted = streamState.messageStarted;
+            const savedOutputTokenCount = streamState.outputTokenCount;
+
+            streamState = {
+              messageStarted: savedMessageStarted,
+              messageStopped: false,
+              contentBlockIndex: savedContentBlockIndex,
+              currentContentType: null,
+              textContent: '',
+              reasoningContent: '',
+              outputTokenCount: savedOutputTokenCount,
+              hasToolUse: false,
+              toolCallIndex: {},
+              toolCallBuffer: '',
+              inToolCall: false,
+              pendingToolCalls: [],
+              suppressStopEvents: true, // will be set again at top of loop
+              stopReason: null
+            };
+
+            // Don't send message_start again - just continue with content blocks
+            continue;
+          }
+
+          // Response is complete or max continues reached - send final events
+          if (streamState && streamState.messageStopped && !res.writableEnded) {
+            const finalReason = streamState.hasToolUse ? 'tool_use' : (streamState.stopReason || 'end_turn');
+            sendEvent('message_delta', createAnthropicMessageDelta(finalReason, { output_tokens: streamState.outputTokenCount || 0 }));
+            sendEvent('message_stop', { type: 'message_stop' });
+          }
+          break;
+        }
+
+        // Finalize: if message_stop was already sent by llmUtilsChunkToAnthropic, just end
+        if (streamState && streamState.messageStopped) {
+          if (!res.writableEnded) res.end();
+        } else if (streamState && streamState.messageStarted) {
+          // Stream ended without proper done event - send closing events
+          if (!res.writableEnded) {
+            if (streamState.contentBlockIndex >= 0 && streamState.currentContentType !== null) {
+              sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
+            }
+            const finalReason = streamState.hasToolUse ? 'tool_use' : 'end_turn';
+            sendEvent('message_delta', createAnthropicMessageDelta(finalReason, { output_tokens: streamState.outputTokenCount || 0 }));
+            sendEvent('message_stop', { type: 'message_stop' });
+            res.end();
+          }
         } else {
-          sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
-          sendEvent('content_block_start', createAnthropicContentBlockStart(0, 'text', { text: '' }));
-          sendEvent('content_block_stop', { index: 0 });
-          sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: 0 }));
-          sendEvent('message_stop', {});
-          res.end();
+          // No content was received at all
+          if (!res.writableEnded) {
+            sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
+            sendEvent('content_block_start', createAnthropicContentBlockStart(0, 'text', { text: '' }));
+            sendEvent('content_block_stop', { type: 'content_block_stop', index: 0 });
+            sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: 0 }));
+            sendEvent('message_stop', { type: 'message_stop' });
+            res.end();
+          }
         }
       } catch (err) {
         console.error('[anthropic stream] error:', err);
@@ -1147,6 +1249,7 @@ app.listen(PORT, () => {
   console.log(`[Trae Local API] Anthropic endpoint: http://localhost:${PORT}/v1/messages`);
   console.log(`[Trae Local API] Agent tools: read_file, write_file, list_files, search_internet, fetch_url, execute_command`);
   console.log(`[Trae Local API] Workspace dir: ${WORKSPACE_DIR || 'not set'}`);
+  console.log(`[Trae Local API] Auto-continue: ${AUTO_CONTINUE ? `enabled (max ${MAX_CONTINUES})` : 'disabled'}`);
   if (OUTPUT_SYNC_DIR) {
     console.log(`[Trae Local API] Output sync dir: ${OUTPUT_SYNC_DIR}`);
   }
