@@ -12,7 +12,7 @@
 - 自动解析返回值
 - 配置默认项目目录
 
-**工作目录**：`d:\_program\Trae\zx-test\`
+**工作目录**：`<Trae IDE workspace path>`
 
 **当前状态**：**API 服务器已完全可用** - CN 版和 SG 版均支持流式响应，CN 版加密已破解。
 
@@ -300,7 +300,7 @@ Accept: text/event-stream
 - **Trae SG 版本**：3.5.51（stable）
 - **Node.js**：v24.12.0
 - **代理**：HTTP localhost:1085/7891，SOCKS5 localhost:1083
-- **工作目录**：`d:\_program\Trae\zx-test\`
+- **工作目录**：`<Trae IDE workspace path>`
 - **API 服务器**：http://localhost:19900
 
 ---

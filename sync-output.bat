@@ -2,7 +2,7 @@
 chcp 65001 >nul 2>nul
 setlocal enabledelayedexpansion
 
-set SOURCE_DIR=d:\_program\Trae\zx-test\output
+set SOURCE_DIR=%~dp0output
 set DEST_DIR=%WORKSPACE_DIR%
 
 if not exist "%DEST_DIR%" (
