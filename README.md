@@ -231,6 +231,33 @@ claude
 
 在 `.env` 中设置 `TRAE_MANUAL_TOKEN=eyJ...`，服务器在自动解密失败时回退使用。
 
+## Data 文件说明
+
+`data/` 目录包含 Trae API 的模型配置参数，服务启动时会自动生成。如需手动获取：
+
+### 自动生成（推荐）
+
+首次启动服务时，如果 `data/` 目录不存在，服务会自动调用 Trae API 获取模型列表并生成配置文件。
+
+### 手动获取
+
+1. 打开 Trae IDE，登录账号
+2. 打开浏览器开发者工具（F12）→ Network
+3. 在 Trae IDE 中触发一次 AI 对话
+4. 在 Network 面板中找到对 `llm_utils_chat` 或 `model/detail` 的请求
+5. 响应中的模型配置数据保存到 `data/` 目录：
+
+```bash
+# CN 版模型列表
+data/cn-models-detail.json   # 模型详情（名称、能力、图标等）
+
+# 模型请求参数（含加密的 RequestPin/EncryptedStr）
+data/detail-param-builder_v3.json  # Builder 模式参数
+data/detail-param-chat_v3.json     # Chat 模式参数
+```
+
+> **注意**：`encrypted_model_params` 中的 `RequestPin` 和 `EncryptedStr` 是与账号绑定的加密凭据，请勿分享给他人。
+
 ## 项目结构
 
 ```

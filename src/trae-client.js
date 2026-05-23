@@ -201,11 +201,27 @@ async function llmUtilsChat(messages, model, stream, options) {
 
     console.log(`[llmUtilsChat] POST ${endpoint}, function=${funcName}, config_name=${options?.config_name || 'default'}, model=${body.model || 'default'}, stream=${stream}, logId=${logId}`);
 
-    const resp = await fetch(endpoint, applyProxy({
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    }));
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 300000); // 5 min timeout
+
+    let resp;
+    try {
+      resp = await fetch(endpoint, applyProxy({
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal
+      }));
+      clearTimeout(timeout);
+    } catch (err) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        trafficLogger.logError(logId, 'llm_utils_chat request timed out after 300s');
+        trafficLogger.finalizeLog(logId);
+        throw new Error('llm_utils_chat request timed out after 300s');
+      }
+      throw err;
+    }
 
     trafficLogger.logResponseStatus(logId, resp.status);
 

@@ -887,6 +887,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
       res.setHeader('X-Accel-Buffering', 'no');
 
       const sendEvent = (eventType, data) => {
+        if (res.writableEnded) return;
         if (eventType === 'message_stop') {
           const elapsed = Date.now() - startTime;
           const textLen = streamState ? streamState.textContent.length : 0;
@@ -907,36 +908,57 @@ app.post('/v1/messages', authenticate, async (req, res) => {
 
         if (result.body) {
           result.body.on('data', (chunk) => {
-            buffer += chunk.toString();
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+            try {
+              buffer += chunk.toString();
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
 
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
 
-              const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
-              if (!parsed) continue;
+                const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
+                if (!parsed) continue;
 
-              if (parsed._type === 'event_name') {
-                currentEventName = parsed.value;
-                if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, null);
-                continue;
+                if (parsed._type === 'event_name') {
+                  currentEventName = parsed.value;
+                  if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, null);
+                  continue;
+                }
+
+                if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, parsed);
+                if (upstreamLogId && parsed.type === 'text' && parsed.content) {
+                  trafficLogger.logResponseContent(upstreamLogId, parsed.content, parsed.reasoning);
+                }
+                if (upstreamLogId && parsed.type === 'token_usage') {
+                  trafficLogger.logTokenUsage(upstreamLogId, parsed.data);
+                }
+
+                // Send keep-alive ping for progress events
+                if (parsed.type === 'progress') {
+                  sendEvent('ping', { type: 'ping' });
+                  continue;
+                }
+
+                const { events, state } = llmUtilsChunkToAnthropic(parsed, messageId, modelName, streamState, toolMap);
+                streamState = state;
+
+                for (const ev of events) {
+                  sendEvent(ev.event, ev.data);
+                }
               }
-
-              if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, parsed);
-              if (upstreamLogId && parsed.type === 'text' && parsed.content) {
-                trafficLogger.logResponseContent(upstreamLogId, parsed.content, parsed.reasoning);
-              }
-              if (upstreamLogId && parsed.type === 'token_usage') {
-                trafficLogger.logTokenUsage(upstreamLogId, parsed.data);
-              }
-
-              const { events, state } = llmUtilsChunkToAnthropic(parsed, messageId, modelName, streamState, toolMap);
-              streamState = state;
-
-              for (const ev of events) {
-                sendEvent(ev.event, ev.data);
+            } catch (err) {
+              console.error(`[anthropic ${reqId}] Error processing chunk:`, err);
+              // Try to gracefully close the stream
+              if (!res.writableEnded && streamState && streamState.messageStarted && !streamState.messageStopped) {
+                try {
+                  if (streamState.contentBlockIndex >= 0 && streamState.currentContentType !== null) {
+                    sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
+                  }
+                  sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: streamState.outputTokenCount || 0 }));
+                  sendEvent('message_stop', { type: 'message_stop' });
+                } catch (closeErr) { /* ignore */ }
+                res.end();
               }
             }
           });
@@ -946,8 +968,8 @@ app.post('/v1/messages', authenticate, async (req, res) => {
             console.log(`[anthropic ${reqId}] stream body ended: ${elapsed}ms, messageStopped=${streamState?.messageStopped}, messageStarted=${streamState?.messageStarted}`);
             if (upstreamLogId) trafficLogger.finalizeLog(upstreamLogId, {
               fullContent: streamState?.textContent || '',
-              fullReasoning: '',
-              tokenUsage: null
+              fullReasoning: streamState?.reasoningContent || '',
+              tokenUsage: streamState?.outputTokenCount ? { completion_tokens: streamState.outputTokenCount } : null
             });
             if (!res.writableEnded) {
               // Only send closing events if message_stop hasn't been sent yet

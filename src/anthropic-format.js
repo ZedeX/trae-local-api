@@ -429,7 +429,6 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       toolCallBuffer: '',     // buffer for detecting <toolcall> tags in text stream
       inToolCall: false,      // currently inside a <toolcall> tag
       pendingToolCalls: [],   // extracted tool calls waiting to be emitted
-      textBlockOpen: false    // whether a text content block is currently open
     };
   }
 
@@ -556,7 +555,6 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
         }
         state.contentBlockIndex++;
         state.currentContentType = 'text';
-        state.textBlockOpen = true;
         events.push({
           event: 'content_block_start',
           data: createAnthropicContentBlockStart(state.contentBlockIndex, 'text', { text: '' })
@@ -635,49 +633,82 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
   }
 
   if (chunk.type === 'done') {
-    // Flush any remaining toolCallBuffer (text that wasn't part of a <toolcall>)
-    if (state.toolCallBuffer && !state.inToolCall) {
-      const remaining = state.toolCallBuffer;
-      state.toolCallBuffer = '';
-      if (remaining) {
-        if (state.currentContentType !== 'text') {
-          if (state.contentBlockIndex >= 0) {
+    // Flush toolCallBuffer
+    if (state.toolCallBuffer) {
+      if (state.inToolCall) {
+        // <toolcall> was opened but </toolcall> never arrived (e.g. max_tokens truncation)
+        // Try to extract tool call from the incomplete buffer
+        const bufferContent = state.toolCallBuffer.trim();
+        try {
+          const toolData = JSON.parse(bufferContent);
+          state.pendingToolCalls.push({
+            name: toolData.name || toolData.function?.name || '',
+            input: toolData.params || toolData.arguments || toolData.input || {}
+          });
+          console.log(`[anthropic-format] Recovered incomplete toolcall from buffer: ${toolData.name}`);
+        } catch (e) {
+          // Buffer is not valid JSON on its own - try to find JSON in it
+          const jsonMatch = bufferContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              const toolData = JSON.parse(jsonMatch[0]);
+              state.pendingToolCalls.push({
+                name: toolData.name || toolData.function?.name || '',
+                input: toolData.params || toolData.arguments || toolData.input || {}
+              });
+              console.log(`[anthropic-format] Recovered toolcall from partial buffer: ${toolData.name}`);
+            } catch (e2) {
+              console.warn(`[anthropic-format] Could not parse incomplete toolcall buffer, discarding: ${bufferContent.substring(0, 100)}`);
+            }
+          }
+        }
+        state.inToolCall = false;
+        state.toolCallBuffer = '';
+      } else {
+        // Not inside a toolcall - flush remaining buffer as text
+        const remaining = state.toolCallBuffer;
+        state.toolCallBuffer = '';
+        if (remaining) {
+          if (state.currentContentType !== 'text') {
+            if (state.contentBlockIndex >= 0) {
+              events.push({
+                event: 'content_block_stop',
+                data: createAnthropicStreamEvent('content_block_stop', { index: state.contentBlockIndex })
+              });
+            }
+            state.contentBlockIndex++;
+            state.currentContentType = 'text';
             events.push({
-              event: 'content_block_stop',
-              data: createAnthropicStreamEvent('content_block_stop', { index: state.contentBlockIndex })
+              event: 'content_block_start',
+              data: createAnthropicContentBlockStart(state.contentBlockIndex, 'text', { text: '' })
             });
           }
-          state.contentBlockIndex++;
-          state.currentContentType = 'text';
-          state.textBlockOpen = true;
           events.push({
-            event: 'content_block_start',
-            data: createAnthropicContentBlockStart(state.contentBlockIndex, 'text', { text: '' })
+            event: 'content_block_delta',
+            data: createAnthropicContentBlockDelta(state.contentBlockIndex, {
+              type: 'text_delta',
+              text: remaining
+            })
           });
         }
-        events.push({
-          event: 'content_block_delta',
-          data: createAnthropicContentBlockDelta(state.contentBlockIndex, {
-            type: 'text_delta',
-            text: remaining
-          })
-        });
       }
     }
 
-    // Also check for <toolcall> tags in accumulated textContent as fallback
+    // Fallback: check for <toolcall> tags in accumulated textContent
     // (in case the streaming detector missed some due to chunk boundaries)
-    const toolCallRegex = /<toolcall>\s*([\s\S]*?)\s*<\/toolcall>/g;
+    // Support both closed and unclosed tags
     const extractedToolCalls = [];
+
+    // Strict match: <toolcall>...</toolcall>
+    const strictRegex = /<toolcall>\s*([\s\S]*?)\s*<\/toolcall>/g;
     let match;
-    while ((match = toolCallRegex.exec(state.textContent)) !== null) {
+    while ((match = strictRegex.exec(state.textContent)) !== null) {
       try {
         const toolData = JSON.parse(match[1]);
         const tc = {
           name: toolData.name || toolData.function?.name || '',
           input: toolData.params || toolData.arguments || toolData.input || {}
         };
-        // Only add if not already detected by streaming parser
         const alreadyDetected = state.pendingToolCalls.some(
           p => p.name === tc.name && JSON.stringify(p.input) === JSON.stringify(tc.input)
         );
@@ -685,7 +716,32 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
           extractedToolCalls.push(tc);
         }
       } catch (e) {
-        console.error(`[anthropic-format] Failed to parse toolcall: ${e.message}, raw: ${match[1]?.substring(0, 100)}`);
+        console.error(`[anthropic-format] Failed to parse toolcall (strict): ${e.message}`);
+      }
+    }
+
+    // Loose match: <toolcall>... without closing tag (handles truncation)
+    const looseRegex = /<toolcall>\s*([\s\S]*?)(?:<\/toolcall>|$)/g;
+    while ((match = looseRegex.exec(state.textContent)) !== null) {
+      try {
+        const raw = match[1].trim();
+        if (!raw) continue;
+        const toolData = JSON.parse(raw);
+        const tc = {
+          name: toolData.name || toolData.function?.name || '',
+          input: toolData.params || toolData.arguments || toolData.input || {}
+        };
+        const alreadyDetected = state.pendingToolCalls.some(
+          p => p.name === tc.name && JSON.stringify(p.input) === JSON.stringify(tc.input)
+        ) || extractedToolCalls.some(
+          p => p.name === tc.name && JSON.stringify(p.input) === JSON.stringify(tc.input)
+        );
+        if (!alreadyDetected) {
+          extractedToolCalls.push(tc);
+          console.log(`[anthropic-format] Recovered toolcall from loose match: ${tc.name}`);
+        }
+      } catch (e) {
+        // Not valid JSON, skip
       }
     }
 
