@@ -1,6 +1,6 @@
 # API 接口文档
 
-Trae Local API 提供与 OpenAI API 兼容的接口，基础地址为 `http://localhost:9900`。
+Trae Local API 提供与 OpenAI API 兼容的接口，基础地址为 `http://localhost:19900`。
 
 ## 认证
 
@@ -182,7 +182,7 @@ GET /v1/models/detail?function=chat_v3
   "api_host": "https://trae-api-cn.mchost.guru",
   "account": { "username": "user@example.com" },
   "workspace_dir": "d:\\_program\\Trae",
-  "device_ids": { "machine_id": "87ddf83d..." }
+  "device_ids": { "machine_id": "abc123..." }
 }
 ```
 
@@ -380,7 +380,7 @@ GET /v1/models/detail?function=chat_v3
   "created": 1778172000,
   "model": "auto",
   "filename": "python-report.md",
-  "saved_to": "D:\\zProject\\test-trae-cn\\python-report.md",
+  "saved_to": "/path/to/your/workspace/python-report.md",
   "file_size": 2048,
   "content_preview": "# Python Best Practices\n\n...",
   "finish_reason": "stop",
@@ -397,9 +397,9 @@ GET /v1/models/detail?function=chat_v3
 ```json
 {
   "error": {
-    "message": "File already exists: D:\\zProject\\test-trae-cn\\report.md. Set overwrite=true to replace.",
+    "message": "File already exists: /path/to/your/workspace/report.md. Set overwrite=true to replace.",
     "type": "file_exists",
-    "path": "D:\\zProject\\test-trae-cn\\report.md"
+    "path": "/path/to/your/workspace/report.md"
   }
 }
 ```
@@ -428,7 +428,7 @@ GET /v1/models/detail?function=chat_v3
 
 ```json
 {
-  "workspace": "D:\\zProject\\test-trae-cn",
+  "workspace": "/path/to/your/workspace",
   "files": [
     { "name": "report.md", "path": "report.md", "size": 2048, "modified": "2026-05-08T10:00:00.000Z" },
     { "name": "page.html", "path": "page.html", "size": 4096, "modified": "2026-05-08T10:05:00.000Z" }
@@ -461,7 +461,7 @@ GET /v1/files/read?path=report.md
 ```json
 {
   "path": "report.md",
-  "full_path": "D:\\zProject\\test-trae-cn\\report.md",
+  "full_path": "/path/to/your/workspace/report.md",
   "size": 2048,
   "content": "# Report\n\nThis is the content..."
 }
@@ -490,7 +490,7 @@ GET /v1/files/read?path=report.md
 
 - 流式输出正常进行（客户端可以实时看到内容）
 - 流结束后，完整内容自动保存到指定文件
-- 保存成功后，流中会追加一条提示：`[File saved: D:\zProject\test-trae-cn\ai-summary.md]`
+- 保存成功后，流中会追加一条提示：`[File saved: /path/to/your/workspace/ai-summary.md]`
 - 保存失败时，流中会追加错误提示：`[File save failed: ...]`
 - `save_to` 支持相对路径（基于 WORKSPACE_DIR）和绝对路径
 
@@ -521,11 +521,11 @@ GET /v1/files/read?path=report.md
 ```json
 {
   "workspace": "d:\\_program\\Trae\\zx-test\\output",
-  "sync_dir": "D:\\zProject\\test-trae-cn",
+  "sync_dir": "/path/to/your/workspace",
   "pending_files": [
     {
       "src": "d:\\_program\\Trae\\zx-test\\output\\report.md",
-      "dest": "D:\\zProject\\test-trae-cn\\report.md",
+      "dest": "/path/to/your/workspace/report.md",
       "rel": "report.md"
     }
   ],
@@ -543,4 +543,44 @@ GET /v1/files/read?path=report.md
 {
   "cleared": 3
 }
+```
+
+---
+
+## Trae CN 解密模块
+
+Trae CN 版的 `storage.json` 使用自定义 "tc" 加密格式存储认证数据。本项目已完全破解此加密格式，服务器启动时自动解密，无需手动干预。
+
+### 加密格式说明
+
+| 字段 | 偏移 | 长度 | 说明 |
+|------|------|------|------|
+| Header | 0 | 6 | 加密类型标识：`tc\x05\x10\x00\x00`（AES）或 `\x12\x39\x20\x20\x02\x03`（AES_PRIVATE） |
+| RandomBytes | 6 | 32 | 随机数，用于密钥派生 |
+| EncryptedData | 38 | 剩余 | AES-128-CBC 加密数据（前 64 字节为 SHA-512 哈希，剩余为明文） |
+
+### 密钥派生
+
+```
+1. salt = SALT_A XOR SALT_B（AES 类型）或 SALT_C XOR SALT_D（AES_PRIVATE 类型）
+2. hashOfRandom = SHA-512(randomBytes)
+3. finalHash = SHA-512(hashOfRandom + salt)
+4. aesKey = finalHash[0:16]
+5. iv = finalHash[16:32]
+```
+
+### 测试解密
+
+可通过 `api-test-advanced.bat` 的选项 10/11 测试解密功能，或直接使用 Node.js：
+
+```javascript
+const { decryptAuthData, decryptAllEncryptedValues } = require('./src/trae-decrypt');
+
+// 解密认证数据
+const auth = decryptAuthData();
+console.log('Token expires at:', auth.expiredAt);
+
+// 解密所有加密值
+const all = decryptAllEncryptedValues();
+console.log('Decrypted keys:', Object.keys(all));
 ```

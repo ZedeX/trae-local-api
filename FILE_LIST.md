@@ -36,7 +36,8 @@ zx-test/
 |------|------|
 | `server.js` | Express 服务器主入口，实现 OpenAI 兼容的 `/v1/chat/completions` 端点，支持流式/非流式响应、模型选择、加解密、文件输出（`save_to` 参数和 `/v1/chat/file` 端点）、工作区文件管理（`/v1/files`、`/v1/files/read`）等 |
 | `trae-client.js` | Trae API 客户端，核心通信逻辑。包含 `llmUtilsChat`、`chatCompletion`、`createAgentTask` 三个端点的调用，以及指数退避重试、模型自动映射等 |
-| `auth.js` | 认证管理模块，从 Trae IDE 存储中提取 JWT token，支持 CN/SG 双版本，自动检测 token 过期并刷新，支持 `TRAE_MANUAL_TOKEN` 环境变量手动设置 token |
+| `auth.js` | 认证管理模块，从 Trae IDE 存储中提取 JWT token，支持 CN/SG 双版本，自动检测 token 过期并刷新，支持 `TRAE_MANUAL_TOKEN` 环境变量手动设置 token。CN 版通过 `trae-decrypt.js` 解密加密数据 |
+| `trae-decrypt.js` | Trae CN "tc" 加密格式解密模块，支持 AES 和 AES_PRIVATE 两种加密类型，使用 AES-128-CBC + SHA-512 + 硬编码 XOR 盐值解密，提供 `decryptAuthData()` 和 `decryptAllEncryptedValues()` 接口 |
 | `openai-format.js` | 响应格式转换模块，将 Trae 后端的 SSE 事件流解析并转换为 OpenAI 兼容格式，包含调试信息过滤 |
 | `crypto.js` | AES-256-GCM 加解密工具，提供 `/v1/encrypt` 和 `/v1/decrypt` 端点的底层实现 |
 | `uuid.js` | UUID v4 生成工具 |
@@ -199,6 +200,7 @@ zx-test/
 | `decrypt-tc-node.js` | 尝试解密 `tc` 格式的加密认证数据（Node.js 版） |
 | `decrypt-tc-v2.js` | 解密 `tc` 格式 v2，尝试多种 nonce 偏移量 |
 | `decrypt-tc-v3.js` | 解密 `tc` 格式 v3，详细字节分析 |
+| `decrypt-tc-final.js` | **最终版 `tc` 格式解密脚本**，完整实现 AES-128-CBC + SHA-512 + XOR 盐值解密，支持 AES 和 AES_PRIVATE 两种类型，可独立运行测试 |
 
 ---
 
@@ -245,8 +247,8 @@ zx-test/
 
 | 文件 | 作用 |
 |------|------|
-| `api-test.bat` | API 测试工具，支持对话、文件生成（`/v1/chat/file`）、流式+保存（`save_to`）、工作区文件管理、模型列表、加解密等 |
-| `api-test-advanced.bat` | 高级版 API 测试工具，支持多轮对话、模型选择、函数选择等 |
+| `api-test.bat` | API 测试工具，支持对话、文件生成（`/v1/chat/file`）、流式+保存（`save_to`）、工作区文件管理、模型列表、模型详情、认证/解密状态检查等 |
+| `api-test-advanced.bat` | 高级版 API 测试工具，支持多轮对话、模型选择、函数选择、CN 解密模块测试、全量存储解密等 |
 | `extract-token.bat` | Token 自动提取工具，从 Trae IDE 日志中提取 JWT token 并保存到 .env |
 | `sync-output.bat` | 输出文件同步工具，将 sandbox 内的输出文件同步到外部目录 |
 

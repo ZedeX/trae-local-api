@@ -5,6 +5,7 @@ const {
   buildStreamHeaders, isTokenExpired, refreshTokenIfNeeded,
   detectEdition, getDeviceInfo
 } = require('./auth');
+const trafficLogger = require('./traffic-logger');
 
 const HTTP_PROXY = process.env.HTTP_PROXY || process.env.http_proxy || '';
 const HTTPS_PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || '';
@@ -190,7 +191,15 @@ async function llmUtilsChat(messages, model, stream, options) {
 
     const endpoint = `${apiHost}/api/agent/v3/llm_utils_chat`;
 
-    console.log(`[llmUtilsChat] POST ${endpoint}, function=${funcName}, config_name=${options?.config_name || 'default'}, model=${body.model || 'default'}, stream=${stream}`);
+    // 记录请求
+    const logId = trafficLogger.logRequest('llmUtilsChat', {
+      url: endpoint,
+      method: 'POST',
+      headers: headers,
+      body: body
+    });
+
+    console.log(`[llmUtilsChat] POST ${endpoint}, function=${funcName}, config_name=${options?.config_name || 'default'}, model=${body.model || 'default'}, stream=${stream}, logId=${logId}`);
 
     const resp = await fetch(endpoint, applyProxy({
       method: 'POST',
@@ -198,8 +207,12 @@ async function llmUtilsChat(messages, model, stream, options) {
       body: JSON.stringify(body)
     }));
 
+    trafficLogger.logResponseStatus(logId, resp.status);
+
     if (!resp.ok) {
       const errText = await resp.text();
+      trafficLogger.logError(logId, `llm_utils_chat failed: ${resp.status} ${errText}`);
+      trafficLogger.finalizeLog(logId);
       throw new Error(`llm_utils_chat failed: ${resp.status} ${errText}`);
     }
 
@@ -207,12 +220,18 @@ async function llmUtilsChat(messages, model, stream, options) {
       return {
         body: resp.body,
         function: funcName,
+        logId: logId,
       };
     }
 
+    const data = await resp.json();
+    trafficLogger.logResponseData(logId, data);
+    trafficLogger.finalizeLog(logId);
+
     return {
-      data: await resp.json(),
+      data: data,
       function: funcName,
+      logId: logId,
     };
   });
 }
@@ -315,7 +334,15 @@ async function createAgentTask(messages, model, stream, options) {
 
   const endpoint = `${apiHost}/api/agent/v3/create_agent_task`;
 
-  console.log(`[createAgentTask] POST ${endpoint}, model=${modelId}, stream=${stream}, session=${sessionId}`);
+  // 记录请求
+  const logId = trafficLogger.logRequest('createAgentTask', {
+    url: endpoint,
+    method: 'POST',
+    headers: headers,
+    body: body
+  });
+
+  console.log(`[createAgentTask] POST ${endpoint}, model=${modelId}, stream=${stream}, session=${sessionId}, logId=${logId}`);
 
   const resp = await fetch(endpoint, applyProxy({
     method: 'POST',
@@ -323,8 +350,12 @@ async function createAgentTask(messages, model, stream, options) {
     body: JSON.stringify(body)
   }));
 
+  trafficLogger.logResponseStatus(logId, resp.status);
+
   if (!resp.ok) {
     const errText = await resp.text();
+    trafficLogger.logError(logId, `create_agent_task failed: ${resp.status} ${errText}`);
+    trafficLogger.finalizeLog(logId);
     throw new Error(`create_agent_task failed: ${resp.status} ${errText}`);
   }
 
@@ -333,15 +364,21 @@ async function createAgentTask(messages, model, stream, options) {
       body: resp.body,
       sessionId,
       taskId,
-      messageId
+      messageId,
+      logId: logId,
     };
   }
 
+  const data = await resp.json();
+  trafficLogger.logResponseData(logId, data);
+  trafficLogger.finalizeLog(logId);
+
   return {
-    data: await resp.json(),
+    data: data,
     sessionId,
     taskId,
-    messageId
+    messageId,
+    logId: logId,
   };
 }
 
@@ -368,6 +405,17 @@ async function chatCompletion(messages, model, stream, options) {
   };
 
   const url = `${apiHost}/api/ide/v1/chat`;
+
+  // 记录请求
+  const logId = trafficLogger.logRequest('chatCompletion', {
+    url: url,
+    method: 'POST',
+    headers: headers,
+    body: body
+  });
+
+  console.log(`[chatCompletion] POST ${url}, model=${modelId}, stream=${stream}, logId=${logId}`);
+
   const resp = await fetch(url, applyProxy({
     method: 'POST',
     headers: {
@@ -377,16 +425,24 @@ async function chatCompletion(messages, model, stream, options) {
     body: JSON.stringify(body)
   }));
 
+  trafficLogger.logResponseStatus(logId, resp.status);
+
   if (!resp.ok) {
     const errText = await resp.text();
+    trafficLogger.logError(logId, `chat completion failed: ${resp.status} ${errText}`);
+    trafficLogger.finalizeLog(logId);
     throw new Error(`chat completion failed: ${resp.status} ${errText}`);
   }
 
   if (stream) {
-    return resp.body;
+    return { body: resp.body, logId: logId };
   }
 
-  return resp.json();
+  const data = await resp.json();
+  trafficLogger.logResponseData(logId, data);
+  trafficLogger.finalizeLog(logId);
+
+  return data;
 }
 
 module.exports = {

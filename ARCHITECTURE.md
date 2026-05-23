@@ -11,7 +11,7 @@
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Trae Local API Server                         │
-│                    (Express, localhost:9900)                     │
+│                    (Express, localhost:19900)                     │
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
 │  │  认证中间件   │  │  路由处理     │  │  响应格式转换         │  │
@@ -27,6 +27,10 @@
 │  │  crypto.js   │  │   uuid.js    │  │     .env 配置        │  │
 │  │  加解密       │  │  ID 生成      │  │                      │  │
 │  └──────────────┘  └──────────────┘  └──────────────────────┘  │
+│  ┌──────────────┐                                               │
+│  │trae-decrypt  │                                               │
+│  │CN tc decrypt │                                               │
+│  └──────────────┘                                               │
 └──────────────────────────┬──────────────────────────────────────┘
                            │ HTTPS/SSE
                            ▼
@@ -112,19 +116,25 @@ Trae 格式:    { role: "user", content: [{ type: "text", text: "Hello" }] }
 
 **关键设计**：
 - 自动检测 CN/SG 版本（优先使用 `.env` 配置，其次按文件修改时间判断）
-- SG 版直接读取明文 JSON，CN 版跳过加密数据
+- **CN 版**：使用 `trae-decrypt.js` 解密 "tc" 格式加密数据（AES-128-CBC + SHA-512）
+- **SG 版**：直接读取明文 JSON
+- 解密失败时回退到另一个版本或手动 token（`TRAE_MANUAL_TOKEN` 环境变量）
 - Token 即将过期时自动刷新（提前 30 分钟）
-- 刷新后回写 `storage.json`，保持 Trae IDE 一致性
+- 刷新后仅在原始数据为明文时回写 `storage.json`（加密数据仅内存更新）
 
 **认证数据流**：
 ```
 storage.json
   → 读取 iCubeAuthInfo://icube.cloudide
   → SG 版: JSON.parse(明文字符串)
-  → CN 版: 跳过（加密格式，无法解密）
+  → CN 版: trae-decrypt.js 解密 "tc" 格式
+    → Base64 解码 → 检测 "tc" 前缀 → 提取随机数 + 加密数据
+    → SHA-512 + XOR 盐值派生 AES-128-CBC 密钥/IV
+    → 解密 + SHA-512 哈希验证 → 提取明文 JSON
   → 检查 token 有效期
   → 即将过期: ExchangeToken API 刷新
-  → 回写 storage.json
+  → 明文存储: 回写 storage.json
+  → 加密存储: 仅内存更新（不回写）
 ```
 
 **HTTP 请求头构造**：
@@ -132,7 +142,7 @@ storage.json
 Authorization: Cloud-IDE-JWT <token>
 X-Cloudide-Token: <token>
 x-uid: <userId>
-x-app-id: 6eefa01c-1036-4c7e-9ca5-d891f63bfcd8
+x-app-id: <YOUR_APP_ID>
 x-device-id: <hash of machineId>
 x-machine-id: <telemetry.machineId>
 x-ide-version: 3.3.55 (CN) / 3.5.51 (SG)
@@ -171,12 +181,40 @@ Trae SSE 事件:
 
 ### 5. crypto.js - 加解密
 
-**职责**：提供 AES-256-GCM 加解密功能
+**职责**：提供 AES-256-GCM 加解密功能（API 传输加密）
 
 **设计**：
 - 密钥来源：环境变量 `TRAE_API_ENCRYPT_KEY`，未设置时自动生成
 - 加密格式：`<iv_hex>:<authTag_hex>:<encrypted_hex>`
 - 用途：保护通过 API 传输的敏感数据
+
+### 5.1. trae-decrypt.js - Trae CN 解密
+
+**职责**：解密 Trae CN 版自定义 "tc" 加密格式的存储数据
+
+**关键设计**：
+- 支持两种加密类型：`AES`（"tc" 前缀，0x74 0x63 0x05 0x10 0x00 0x00）和 `AES_PRIVATE`（0x12 0x39 0x20 0x20 0x02 0x03）
+- 密钥派生：SHA-512(randomBytes) + XOR 盐值 → SHA-512 → 前 16 字节为 AES 密钥，16-32 字节为 IV
+- AES 类型使用 SALT_A ^ SALT_B，AES_PRIVATE 类型使用 SALT_C ^ SALT_D
+- 解密后验证 SHA-512 哈希确保数据完整性
+- 提供 `decryptAuthData()` 自动检测并解密 CN/SG 版认证数据
+- 提供 `decryptAllEncryptedValues()` 解密 storage.json 中所有加密值
+
+**解密流程**：
+```
+Base64 字符串
+  → Buffer.from(base64, 'base64')
+  → 检测加密类型（6 字节 header）
+  → 提取 32 字节随机数 + 加密数据
+  → deriveKeyAndIV(randomBytes, encType):
+    → SHA-512(randomBytes) → hashOfRandom
+    → XOR 盐值（SALT_A ^ SALT_B 或 SALT_C ^ SALT_D）→ salt
+    → SHA-512(hashOfRandom + salt) → finalHash
+    → aesKey = finalHash[0:16], iv = finalHash[16:32]
+  → AES-128-CBC 解密
+  → 前 64 字节 = SHA-512(明文)（验证）
+  → 剩余 = 明文 JSON
+```
 
 ### 6. uuid.js - ID 生成
 
@@ -277,4 +315,5 @@ createAgentTask (回退 2)
 2. **JWT 自动管理** - Token 自动刷新，无需手动维护
 3. **传输加密** - 与 Trae 后端通信使用 HTTPS
 4. **数据加密** - 敏感数据可使用 AES-256-GCM 加密
-5. **无日志泄露** - Token 等敏感信息不在日志中完整输出
+5. **CN 版解密** - Trae CN 自定义 "tc" 加密格式已破解（AES-128-CBC + SHA-512），无需依赖日志提取
+6. **无日志泄露** - Token 等敏感信息不在日志中完整输出

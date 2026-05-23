@@ -7,15 +7,28 @@ require('dotenv').config();
 const { getAuthInfo, getDeviceIds, isTokenExpired, getApiHost, refreshTokenIfNeeded, detectEdition } = require('./auth');
 const { llmUtilsChat, chatCompletion, createAgentTask, getModelDetailParam, getChatModes, resolveModelId, MODEL_MAP, REVERSE_MODEL_MAP, FUNCTION_MAP } = require('./trae-client');
 const { createOpenAIChatCompletion, createOpenAIStreamChunk, createOpenAIModels, parseLlmUtilsChatStream, llmUtilsChunkToOpenAI, parseAgentTaskStream, parseTraeStreamChunk, traeChunkToOpenAI } = require('./openai-format');
+const {
+  createAnthropicMessage,
+  createAnthropicMessageStart,
+  createAnthropicContentBlockStart,
+  createAnthropicContentBlockDelta,
+  createAnthropicContentBlockStop,
+  createAnthropicMessageDelta,
+  createAnthropicMessageStop,
+  createAnthropicError,
+  anthropicToOpenAIMessages,
+  llmUtilsChunkToAnthropic
+} = require('./anthropic-format');
 const { encrypt, decrypt, hashContent } = require('./crypto');
 const { v4: uuidv4 } = require('./uuid');
+const trafficLogger = require('./traffic-logger');
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 const API_KEY = process.env.API_KEY || 'trae-local-api-key';
-const PORT = process.env.PORT || 9900;
+const PORT = process.env.PORT || 19900;
 const WORKSPACE_DIR = process.env.WORKSPACE_DIR || '';
 const OUTPUT_SYNC_DIR = process.env.OUTPUT_SYNC_DIR || '';
 
@@ -38,11 +51,18 @@ function syncFileToOutput(srcPath) {
 }
 
 function authenticate(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader) {
-    return res.status(401).json({ error: { message: 'Missing Authorization header', type: 'auth_error' } });
+  let token = null;
+  
+  if (req.headers['authorization']) {
+    token = req.headers['authorization'].replace('Bearer ', '');
+  } else if (req.headers['x-api-key']) {
+    token = req.headers['x-api-key'];
   }
-  const token = authHeader.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ error: { message: 'Missing API key (Authorization header or x-api-key)', type: 'auth_error' } });
+  }
+  
   if (token !== API_KEY) {
     return res.status(401).json({ error: { message: 'Invalid API key', type: 'auth_error' } });
   }
@@ -55,7 +75,7 @@ app.get('/v1/models', authenticate, (req, res) => {
   res.json(createOpenAIModels([...models, ...functions]));
 });
 
-function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveToPath) {
+function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveToPath, logId) {
   let buffer = '';
   let currentEventName = '';
   let fullContent = '';
@@ -76,11 +96,17 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
 
       if (parsed._type === 'event_name') {
         currentEventName = parsed.value;
+        // 记录 SSE 事件名
+        if (logId) trafficLogger.logResponseChunk(logId, currentEventName, null);
         continue;
       }
 
+      // 记录 SSE 数据
+      if (logId) trafficLogger.logResponseChunk(logId, currentEventName, parsed);
+
       if (parsed.type === 'token_usage') {
         tokenUsage = parsed.data;
+        if (logId) trafficLogger.logTokenUsage(logId, tokenUsage);
         continue;
       }
 
@@ -115,6 +141,9 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
         res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
+
+        // 完成日志记录
+        if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
         return;
       }
 
@@ -122,9 +151,11 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
       if (openaiChunk) {
         if (parsed.type === 'text' && parsed.content) {
           fullContent += parsed.content;
+          if (logId) trafficLogger.logResponseContent(logId, parsed.content, null);
         }
         if (parsed.type === 'text' && parsed.reasoning) {
           fullReasoning += parsed.reasoning;
+          if (logId) trafficLogger.logResponseContent(logId, null, parsed.reasoning);
         }
         res.write(`data: ${JSON.stringify(openaiChunk)}\n\n`);
       }
@@ -138,10 +169,14 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
       res.write('data: [DONE]\n\n');
       res.end();
     }
+    // 完成日志记录（如果 done 事件未触发）
+    if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
   });
 
   responseBody.on('error', (err) => {
     console.error('[stream] error:', err);
+    if (logId) trafficLogger.logError(logId, err);
+    if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
     if (!res.writableEnded) {
       const errChunk = createOpenAIStreamChunk(completionId, modelName, { content: `\n\n[Error: ${err.message}]` }, 'stop');
       res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
@@ -202,6 +237,9 @@ function handleLegacyStream(responseBody, res, completionId, modelName) {
 }
 
 app.post('/v1/chat/completions', authenticate, async (req, res) => {
+  const reqId = uuidv4().substring(0, 8);
+  const startTime = Date.now();
+
   try {
     const { messages, model, stream, temperature, max_tokens, function: funcName, config_name, workspace_dir, save_to } = req.body;
 
@@ -211,6 +249,8 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
 
     const modelName = model || 'auto';
     const isStream = stream !== false;
+
+    console.log(`[openai ${reqId}] POST /v1/chat/completions model=${modelName} stream=${isStream} messages=${messages.length} function=${funcName || 'auto'}`);
     const completionId = `chatcmpl-${uuidv4()}`;
 
     let saveToPath = null;
@@ -248,7 +288,7 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
         const result = await llmUtilsChat(messages, modelName, true, options);
 
         if (result.body) {
-          handleLlmUtilsStream(result.body, res, completionId, modelName, saveToPath);
+          handleLlmUtilsStream(result.body, res, completionId, modelName, saveToPath, result.logId);
           req.on('close', () => {
             if (result.body && result.body.destroy) result.body.destroy();
           });
@@ -301,6 +341,7 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
         let fullReasoning = '';
         let tokenUsage = null;
         let finishReason = 'stop';
+        const upstreamLogId = result.logId;
 
         if (result.body) {
           await new Promise((resolve, reject) => {
@@ -321,11 +362,15 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
 
                 if (parsed._type === 'event_name') {
                   currentEventName = parsed.value;
+                  if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, null);
                   continue;
                 }
 
+                if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, parsed);
+
                 if (parsed.type === 'token_usage') {
                   tokenUsage = parsed.data;
+                  if (upstreamLogId) trafficLogger.logTokenUsage(upstreamLogId, tokenUsage);
                   continue;
                 }
 
@@ -336,9 +381,11 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
 
                 if (parsed.type === 'text' && parsed.content) {
                   fullContent += parsed.content;
+                  if (upstreamLogId) trafficLogger.logResponseContent(upstreamLogId, parsed.content, null);
                 }
                 if (parsed.type === 'text' && parsed.reasoning) {
                   fullReasoning += parsed.reasoning;
+                  if (upstreamLogId) trafficLogger.logResponseContent(upstreamLogId, null, parsed.reasoning);
                 }
               }
             });
@@ -355,6 +402,8 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
         } : undefined;
 
         const response = createOpenAIChatCompletion(completionId, modelName, fullContent, finishReason, fullReasoning, usage);
+
+        if (upstreamLogId) trafficLogger.finalizeLog(upstreamLogId, { fullContent, fullReasoning, tokenUsage });
 
         if (saveToPath && fullContent) {
           try {
@@ -746,11 +795,335 @@ app.post('/v1/sync/clear', authenticate, (req, res) => {
   res.json({ cleared });
 });
 
+app.post('/v1/messages', authenticate, async (req, res) => {
+  const reqId = uuidv4().substring(0, 8);
+  const startTime = Date.now();
+
+  try {
+    const { model, messages, max_tokens, system, stream, temperature, tools, tool_choice, thinking } = req.body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json(createAnthropicError({
+        type: 'invalid_request_error',
+        message: 'messages is required and must be a non-empty array'
+      }));
+    }
+
+    const modelName = model || 'auto';
+    const isStream = stream === true;
+    const messageId = `msg_${uuidv4().replace(/-/g, '').substring(0, 24)}`;
+
+    console.log(`[anthropic ${reqId}] POST /v1/messages model=${modelName} stream=${isStream} messages=${messages.length} max_tokens=${max_tokens || 'default'} has_tools=${!!tools} has_system=${!!system} thinking=${JSON.stringify(thinking) || 'none'}`);
+
+    const openaiMessages = anthropicToOpenAIMessages(messages, system);
+
+    // If Claude Code sends tools, inject them into the conversation
+    // so the Trae model knows about available tools and uses correct tool names
+    let toolMap = null;  // maps lowercase tool name -> original tool name
+    if (tools && Array.isArray(tools) && tools.length > 0) {
+      toolMap = {};
+      const toolDescriptions = tools.map(t => {
+        const nameLower = t.name.toLowerCase();
+        toolMap[nameLower] = t.name;
+        // Also map common aliases
+        if (nameLower === 'glob' || nameLower === 'listdir' || nameLower === 'list_files') {
+          toolMap['listdir'] = t.name;
+          toolMap['glob'] = t.name;
+          toolMap['list_files'] = t.name;
+        }
+        if (nameLower === 'read' || nameLower === 'read_file') {
+          toolMap['read_file'] = t.name;
+          toolMap['read'] = t.name;
+        }
+        if (nameLower === 'write' || nameLower === 'write_file') {
+          toolMap['write_file'] = t.name;
+          toolMap['write'] = t.name;
+        }
+        if (nameLower === 'bash' || nameLower === 'execute_command' || nameLower === 'run_command') {
+          toolMap['execute_command'] = t.name;
+          toolMap['bash'] = t.name;
+          toolMap['run_command'] = t.name;
+        }
+        const params = t.input_schema?.properties ? Object.keys(t.input_schema.properties).join(', ') : '';
+        return `- ${t.name}(${params}): ${t.description?.substring(0, 200) || ''}`;
+      }).join('\n');
+
+      const toolSystemMsg = `\n\n<available_tools>\nYou have access to the following tools. When you need to use a tool, output a <toolcall> block with the EXACT tool name and params:\n<toolcall>{"name": "ToolName", "params": { "param1": "value1" }}</toolcall>\n\nAvailable tools:\n${toolDescriptions}\n\nIMPORTANT: Use the EXACT tool names listed above (case-sensitive). Do NOT use other tool names.\n</available_tools>`;
+
+      // Inject into the first system message or prepend as system message
+      const systemMsg = openaiMessages.find(m => m.role === 'system');
+      if (systemMsg) {
+        systemMsg.content += toolSystemMsg;
+      } else {
+        openaiMessages.unshift({ role: 'system', content: toolSystemMsg });
+      }
+
+      console.log(`[anthropic ${reqId}] Injected ${tools.length} tools into system prompt, toolMap: ${JSON.stringify(Object.keys(toolMap))}`);
+    }
+
+    // Log first user message for context
+    const firstUserMsg = openaiMessages.find(m => m.role === 'user');
+    if (firstUserMsg) {
+      const preview = typeof firstUserMsg.content === 'string' ? firstUserMsg.content.substring(0, 100) : '(array)';
+      console.log(`[anthropic ${reqId}] first user msg: "${preview}..."`);
+    }
+
+    const authInfo = await refreshTokenIfNeeded();
+    if (isTokenExpired(authInfo)) {
+      return res.status(401).json(createAnthropicError({
+        type: 'authentication_error',
+        message: 'Trae token expired. Please restart Trae IDE to refresh.'
+      }));
+    }
+
+    const options = {};
+    if (max_tokens) options.max_tokens = max_tokens;
+    if (temperature !== undefined) options.temperature = temperature;
+
+    if (isStream) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+
+      const sendEvent = (eventType, data) => {
+        if (eventType === 'message_stop') {
+          const elapsed = Date.now() - startTime;
+          const textLen = streamState ? streamState.textContent.length : 0;
+          console.log(`[anthropic ${reqId}] message_stop sent: ${elapsed}ms, text=${textLen} chars, output_tokens=${streamState?.outputTokenCount || 0}`);
+        }
+        res.write(`event: ${eventType}\n`);
+        res.write(`data: ${JSON.stringify(data)}\n\n`);
+      };
+
+      let streamState = null;
+      let buffer = '';
+      let currentEventName = '';
+      const upstreamLogId = null; // will be set after llmUtilsChat
+
+      try {
+        const result = await llmUtilsChat(openaiMessages, modelName, true, options);
+        const upstreamLogId = result.logId;
+
+        if (result.body) {
+          result.body.on('data', (chunk) => {
+            buffer += chunk.toString();
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+
+              const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
+              if (!parsed) continue;
+
+              if (parsed._type === 'event_name') {
+                currentEventName = parsed.value;
+                if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, null);
+                continue;
+              }
+
+              if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, parsed);
+              if (upstreamLogId && parsed.type === 'text' && parsed.content) {
+                trafficLogger.logResponseContent(upstreamLogId, parsed.content, parsed.reasoning);
+              }
+              if (upstreamLogId && parsed.type === 'token_usage') {
+                trafficLogger.logTokenUsage(upstreamLogId, parsed.data);
+              }
+
+              const { events, state } = llmUtilsChunkToAnthropic(parsed, messageId, modelName, streamState, toolMap);
+              streamState = state;
+
+              for (const ev of events) {
+                sendEvent(ev.event, ev.data);
+              }
+            }
+          });
+
+          result.body.on('end', () => {
+            const elapsed = Date.now() - startTime;
+            console.log(`[anthropic ${reqId}] stream body ended: ${elapsed}ms, messageStopped=${streamState?.messageStopped}, messageStarted=${streamState?.messageStarted}`);
+            if (upstreamLogId) trafficLogger.finalizeLog(upstreamLogId, {
+              fullContent: streamState?.textContent || '',
+              fullReasoning: '',
+              tokenUsage: null
+            });
+            if (!res.writableEnded) {
+              // Only send closing events if message_stop hasn't been sent yet
+              // (llmUtilsChunkToAnthropic sends message_stop on 'done' event)
+              if (streamState && streamState.messageStopped) {
+                // message_stop already sent by done/error handler, just end the response
+                res.end();
+              } else if (streamState && streamState.messageStarted) {
+                // Stream ended without receiving 'done' - send closing events
+                if (streamState.contentBlockIndex >= 0) {
+                  sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
+                }
+                sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: streamState.outputTokenCount || 0 }));
+                sendEvent('message_stop', { type: 'message_stop' });
+                res.end();
+              } else {
+                // No content was received at all - send empty message
+                sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
+                sendEvent('content_block_start', createAnthropicContentBlockStart(0, 'text', { text: '' }));
+                sendEvent('content_block_stop', { type: 'content_block_stop', index: 0 });
+                sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: 0 }));
+                sendEvent('message_stop', { type: 'message_stop' });
+                res.end();
+              }
+            }
+          });
+
+          result.body.on('error', (err) => {
+            console.error('[anthropic stream] error:', err);
+            if (!res.writableEnded) {
+              sendEvent('error', createAnthropicError({
+                type: 'api_error',
+                message: err.message
+              }));
+              res.end();
+            }
+          });
+
+          req.on('close', () => {
+            const elapsed = Date.now() - startTime;
+            console.log(`[anthropic ${reqId}] client disconnected after ${elapsed}ms, messageStopped=${streamState?.messageStopped}`);
+            if (result.body && result.body.destroy) result.body.destroy();
+          });
+        } else {
+          sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
+          sendEvent('content_block_start', createAnthropicContentBlockStart(0, 'text', { text: '' }));
+          sendEvent('content_block_stop', { index: 0 });
+          sendEvent('message_delta', createAnthropicMessageDelta('end_turn', { output_tokens: 0 }));
+          sendEvent('message_stop', {});
+          res.end();
+        }
+      } catch (err) {
+        console.error('[anthropic stream] error:', err);
+        if (!res.writableEnded) {
+          sendEvent('error', createAnthropicError({
+            type: 'api_error',
+            message: err.message
+          }));
+          res.end();
+        }
+      }
+    } else {
+      try {
+        const result = await llmUtilsChat(openaiMessages, modelName, true, options);
+        let fullContent = '';
+        let fullReasoning = '';
+        let tokenUsage = null;
+        let hasToolUse = false;
+        const toolCalls = [];
+        const upstreamLogId = result.logId;
+
+        if (result.body) {
+          await new Promise((resolve, reject) => {
+            let buffer = '';
+            let currentEventName = '';
+
+            result.body.on('data', (chunk) => {
+              buffer += chunk.toString();
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
+                if (!parsed) continue;
+
+                if (parsed._type === 'event_name') {
+                  currentEventName = parsed.value;
+                  if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, null);
+                  continue;
+                }
+
+                if (upstreamLogId) trafficLogger.logResponseChunk(upstreamLogId, currentEventName, parsed);
+
+                if (parsed.type === 'token_usage') {
+                  tokenUsage = parsed.data;
+                  if (upstreamLogId) trafficLogger.logTokenUsage(upstreamLogId, tokenUsage);
+                  continue;
+                }
+
+                if (parsed.type === 'text' && parsed.content) {
+                  fullContent += parsed.content;
+                  if (upstreamLogId) trafficLogger.logResponseContent(upstreamLogId, parsed.content, null);
+                }
+                if (parsed.type === 'text' && parsed.reasoning) {
+                  fullReasoning += parsed.reasoning;
+                  if (upstreamLogId) trafficLogger.logResponseContent(upstreamLogId, null, parsed.reasoning);
+                }
+                if (parsed.type === 'text' && parsed.tool_calls) {
+                  hasToolUse = true;
+                  toolCalls.push(...parsed.tool_calls);
+                }
+              }
+            });
+
+            result.body.on('end', resolve);
+            result.body.on('error', reject);
+          });
+        }
+
+        const usage = tokenUsage ? {
+          input_tokens: tokenUsage.prompt_tokens || 0,
+          output_tokens: tokenUsage.completion_tokens || 0
+        } : undefined;
+
+        if (upstreamLogId) trafficLogger.finalizeLog(upstreamLogId, { fullContent, fullReasoning, tokenUsage });
+
+        // Build content blocks for non-streaming response
+        const contentBlocks = [];
+        if (fullReasoning) {
+          contentBlocks.push({ type: 'thinking', thinking: fullReasoning });
+        }
+        if (fullContent) {
+          contentBlocks.push({ type: 'text', text: fullContent });
+        }
+        for (const tc of toolCalls) {
+          const toolId = tc.id || `toolu_${uuidv4().replace(/-/g, '').substring(0, 24)}`;
+          const toolName = tc.function?.name || tc.name || '';
+          const toolInput = typeof tc.function?.arguments === 'string'
+            ? JSON.parse(tc.function.arguments) : (tc.input || {});
+          contentBlocks.push({
+            type: 'tool_use',
+            id: toolId,
+            name: toolName,
+            input: toolInput
+          });
+        }
+
+        const stopReason = hasToolUse ? 'tool_use' : 'end_turn';
+        const response = createAnthropicMessage(messageId, modelName, contentBlocks.length > 0 ? contentBlocks : '', stopReason, usage);
+        res.json(response);
+      } catch (err) {
+        console.error('[anthropic] error:', err);
+        res.status(500).json(createAnthropicError({
+          type: 'api_error',
+          message: err.message
+        }));
+      }
+    }
+  } catch (err) {
+    console.error('[/v1/messages] error:', err);
+    res.status(500).json(createAnthropicError({
+      type: 'internal_error',
+      message: err.message
+    }));
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`\n[Trae Local API] Server running on http://localhost:${PORT}`);
-  console.log(`[Trae Local API] API Key: ${API_KEY}`);
-  console.log(`[Trae Local API] Primary endpoint: llm_utils_chat (inline_chat)`);
-  console.log(`[Trae Local API] Available functions: ${Object.keys(FUNCTION_MAP).join(', ')}`);
+  console.log(`[Trae Local API] API Key: ${API_KEY.substring(0, 8)}${API_KEY.length > 8 ? '***' : ''}`);
+  console.log(`[Trae Local API] OpenAI endpoint: http://localhost:${PORT}/v1/chat/completions`);
+  console.log(`[Trae Local API] Anthropic endpoint: http://localhost:${PORT}/v1/messages`);
+  console.log(`[Trae Local API] Agent tools: read_file, write_file, list_files, search_internet, fetch_url, execute_command`);
   console.log(`[Trae Local API] Workspace dir: ${WORKSPACE_DIR || 'not set'}`);
   if (OUTPUT_SYNC_DIR) {
     console.log(`[Trae Local API] Output sync dir: ${OUTPUT_SYNC_DIR}`);

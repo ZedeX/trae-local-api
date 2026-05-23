@@ -3,6 +3,7 @@ const path = require('path');
 const os = require('os');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('./uuid');
+const { decryptAuthData: decryptTcAuthData, isTcEncrypted } = require('./trae-decrypt');
 
 function getTraeDataDir() {
   const envDir = process.env.TRAE_DATA_DIR;
@@ -72,12 +73,43 @@ function readStorageJsonByEdition(edition) {
   return JSON.parse(raw);
 }
 
+let _cachedAuthInfo = null;
+
 function getAuthInfo() {
+  if (_cachedAuthInfo && !isTokenExpired(_cachedAuthInfo)) {
+    return _cachedAuthInfo;
+  }
+
   const edition = detectEdition();
   const editions = [edition, edition === 'cn' ? 'sg' : 'cn'];
 
   for (const ed of editions) {
     try {
+      const dataDir = ed === 'cn'
+        ? path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN')
+        : path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
+
+      try {
+        const auth = decryptTcAuthData(dataDir);
+        console.log(`[auth] Using ${ed.toUpperCase()} edition auth data (decrypted)`);
+        _cachedAuthInfo = {
+          token: auth.token,
+          refreshToken: auth.refreshToken,
+          expiredAt: auth.expiredAt,
+          refreshExpiredAt: auth.refreshExpiredAt,
+          tokenReleaseAt: auth.tokenReleaseAt,
+          userId: auth.userId,
+          host: auth.host,
+          userRegion: auth.userRegion,
+          account: auth.account,
+          _edition: ed,
+          _wasEncrypted: true
+        };
+        return _cachedAuthInfo;
+      } catch (decryptErr) {
+        console.log(`[auth] ${ed.toUpperCase()} decryption failed: ${decryptErr.message}, trying plaintext`);
+      }
+
       const storage = readStorageJsonByEdition(ed);
       if (!storage) continue;
 
@@ -86,13 +118,13 @@ function getAuthInfo() {
       if (!authRaw) continue;
 
       if (isEncryptedAuthData(authRaw)) {
-        console.log(`[auth] ${ed.toUpperCase()} edition auth data is encrypted, skipping`);
+        console.log(`[auth] ${ed.toUpperCase()} edition auth data is encrypted and decryption failed, skipping`);
         continue;
       }
 
       const auth = JSON.parse(authRaw);
-      console.log(`[auth] Using ${ed.toUpperCase()} edition auth data`);
-      return {
+      console.log(`[auth] Using ${ed.toUpperCase()} edition auth data (plaintext)`);
+      _cachedAuthInfo = {
         token: auth.token,
         refreshToken: auth.refreshToken,
         expiredAt: auth.expiredAt,
@@ -102,8 +134,10 @@ function getAuthInfo() {
         host: auth.host,
         userRegion: auth.userRegion,
         account: auth.account,
-        _edition: ed
+        _edition: ed,
+        _wasEncrypted: false
       };
+      return _cachedAuthInfo;
     } catch (e) {
       console.log(`[auth] Failed to read ${ed.toUpperCase()} edition: ${e.message}`);
       continue;
@@ -219,9 +253,9 @@ async function exchangeToken(refreshToken) {
   const url = `${authHost}/cloudide/api/v3/trae/oauth/ExchangeToken`;
 
   const body = {
-    ClientID: 'ono9krqynydwx5',
+    ClientID: process.env.TRAE_OAUTH_CLIENT_ID || 'ono9krqynydwx5',
     RefreshToken: refreshToken,
-    ClientSecret: '-',
+    ClientSecret: process.env.TRAE_OAUTH_CLIENT_SECRET || '-',
     UserID: ''
   };
 
@@ -287,6 +321,12 @@ async function refreshTokenIfNeeded() {
         tokenReleaseAt: result.tokenReleaseAt || authInfo.tokenReleaseAt
       };
 
+      if (authInfo._wasEncrypted) {
+        console.log(`Token refreshed successfully (in-memory only, original data was encrypted), new expiry: ${newAuth.expiredAt}`);
+        _cachedAuthInfo = newAuth;
+        return newAuth;
+      }
+
       const storage = readStorageJsonByEdition(authInfo._edition || detectEdition());
       const authKey = 'iCubeAuthInfo://icube.cloudide';
       storage[authKey] = JSON.stringify({
@@ -304,6 +344,7 @@ async function refreshTokenIfNeeded() {
       const storagePath = getStorageJsonPath(authInfo._edition);
       fs.writeFileSync(storagePath, JSON.stringify(storage, null, '\t'), 'utf-8');
       console.log(`Token refreshed successfully, new expiry: ${newAuth.expiredAt}`);
+      _cachedAuthInfo = newAuth;
       return newAuth;
     }
   } catch (err) {
@@ -338,11 +379,11 @@ function getDeviceInfo() {
   const devDeviceId = storage['telemetry.devDeviceId'] || '';
   return {
     cpu: 'Intel',
-    device_id: hashDeviceId(machineId) || '629333755172936',
-    machine_id: machineId || '87ddf83d68c40fe3585c85ced360a8c8adc7647bc06318874feeceba975de97a',
-    device_model: '82RF',
+    device_id: hashDeviceId(machineId) || process.env.TRAE_DEVICE_ID || '',
+    machine_id: machineId || process.env.TRAE_MACHINE_ID || '',
+    device_model: process.env.TRAE_DEVICE_MODEL || '82RF',
     os_name: 'windows',
-    os_version: 'Windows 10 Enterprise LTSC 2021'
+    os_version: process.env.TRAE_OS_VERSION || 'Windows 10'
   };
 }
 
@@ -353,7 +394,7 @@ function buildCommonHeaders(authInfo, deviceIds) {
     'Content-Type': 'application/json',
     'Authorization': `Cloud-IDE-JWT ${authInfo.token}`,
     'X-Cloudide-Token': authInfo.token,
-    'x-app-id': '6eefa01c-1036-4c7e-9ca5-d891f63bfcd8',
+    'x-app-id': process.env.TRAE_APP_ID || '6eefa01c-1036-4c7e-9ca5-d891f63bfcd8',
     'x-app-version': 'default',
     'x-ide-version-code': getIdeVersionCode(),
     'x-app-version-code': getIdeVersionCode(),

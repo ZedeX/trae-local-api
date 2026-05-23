@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-set API_BASE=http://localhost:9900
+set API_BASE=http://localhost:19900
 set API_KEY=trae-local-api-key
 set TEMP_FILE=%TEMP%\trae_api_temp.json
 set HISTORY_FILE=chat_history.txt
@@ -25,11 +25,14 @@ echo  6. List Models
 echo  7. Get Model Details
 echo  8. Check Server Status
 echo.
-echo  [Tools]
-echo  9. Encrypt Text
-echo  10. Decrypt Text
-echo  11. View Chat History
-echo  12. Clear History
+echo  [Auth / Decrypt]
+echo  9. Check Auth Status
+echo  10. Test CN Decrypt Module
+echo  11. Decrypt All Storage Values
+echo.
+echo  [History]
+echo  12. View Chat History
+echo  13. Clear History
 echo.
 echo  0. Exit
 echo.
@@ -44,10 +47,11 @@ if "%choice%"=="5" goto file_chat
 if "%choice%"=="6" goto list_models
 if "%choice%"=="7" goto model_details
 if "%choice%"=="8" goto status
-if "%choice%"=="9" goto encrypt
-if "%choice%"=="10" goto decrypt
-if "%choice%"=="11" goto view_history
-if "%choice%"=="12" goto clear_history
+if "%choice%"=="9" goto auth_status
+if "%choice%"=="10" goto test_decrypt
+if "%choice%"=="11" goto decrypt_all
+if "%choice%"=="12" goto view_history
+if "%choice%"=="13" goto clear_history
 if "%choice%"=="0" goto end
 goto menu
 
@@ -68,7 +72,7 @@ goto quick_chat
 
 :model_chat
 echo.
-echo Available models: auto, glm-5, glm-5.1, deepseek-v3, deepseek-r1, doubao-1-6
+echo Available models: auto, glm-5, glm-5.1, deepseek-v3, deepseek-r1, doubao-1-6, claude-3.5-sonnet, gpt-4o
 echo.
 set /p model="Select model: "
 if "%model%"=="" set model=auto
@@ -183,23 +187,38 @@ echo.
 pause
 goto menu
 
-:encrypt
+:auth_status
 echo.
-set /p text="Enter text to encrypt: "
+echo [Auth Status]
 echo.
-echo [Encrypted]
-curl -s "%API_BASE%/v1/encrypt" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"text\":\"%text%\"}" 2>nul
+curl -s "%API_BASE%/v1/status" -H "Authorization: Bearer %API_KEY%" 2>nul
 echo.
 echo.
 pause
 goto menu
 
-:decrypt
+:test_decrypt
 echo.
-set /p enc="Enter encrypted string: "
+echo [Test Trae CN Decrypt Module]
 echo.
-echo [Decrypted]
-curl -s "%API_BASE%/v1/decrypt" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"encrypted\":\"%enc%\"}" 2>nul
+echo Testing decryptAuthData...
+echo.
+node -e "try{const d=require('./src/trae-decrypt');const r=d.decryptAuthData();console.log('Decrypt: OK');console.log('Token exp:',r.expiredAt||'N/A');console.log('User:',r.account||r.userId||'N/A');console.log('Host:',r.host||'N/A');console.log('RefreshToken:',r.refreshToken?'present':'N/A')}catch(e){console.log('Decrypt error:',e.message)}"
+echo.
+echo.
+echo Testing detectEncType...
+echo.
+node -e "const d=require('./src/trae-decrypt');const h=Buffer.from([0x74,0x63,0x05,0x10,0x00,0x00]);console.log('tc header detect:',d.detectEncType(h));const h2=Buffer.from([18,57,32,32,2,3]);console.log('private header detect:',d.detectEncType(h2))"
+echo.
+echo.
+pause
+goto menu
+
+:decrypt_all
+echo.
+echo [Decrypt All Encrypted Storage Values]
+echo.
+node -e "try{const d=require('./src/trae-decrypt');const r=d.decryptAllEncryptedValues();const keys=Object.keys(r);if(keys.length===0){console.log('No encrypted values found')}else{keys.forEach(k=>{console.log('---');console.log('Key:',k);const v=r[k];if(v._decryptError){console.log('Error:',v._decryptError)}else{console.log('Value:',JSON.stringify(v).substring(0,200))}})}}catch(e){console.log('Error:',e.message)}"
 echo.
 echo.
 pause

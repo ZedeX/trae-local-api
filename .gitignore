@@ -1,8 +1,40 @@
+# Dependencies
 node_modules/
 __pycache__/
 *.pyc
+
+# Environment & secrets
 .env
-chat_history.txt
-*.json
-!package.json
-!package-lock.json
+.env.local
+.env.production
+os-crypt-key.txt
+**/os-crypt-key.txt
+decrypted-*.json
+test-*-request.json
+
+# History (不同步)
+.history.md
+
+# Logs
+logs/
+
+# Output & temp
+output/
+tmp-userdata/
+**/tmp-userdata/
+
+# Test data & scripts (探索/测试脚本不同步)
+scripts/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/

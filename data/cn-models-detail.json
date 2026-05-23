@@ -1,0 +1,612 @@
+{
+  "builder_v3": [
+    {
+      "config_name": "Doubao-Seed-2.0-Code",
+      "display_name": "Doubao-Seed-2.0-Code",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "Doubao-Seed-2.0-Code__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "doubao_1_8",
+      "display_name": "Doubao-Seed-1.8",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "doubao_1_8__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "Doubao_1_6",
+      "display_name": "Doubao-Seed-Code",
+      "model_capability": "chat_model",
+      "is_default": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "Doubao_1_6__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "doubao-for-auto",
+      "display_name": "",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "doubao-for-auto__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "minimax-m2.7",
+      "display_name": "MiniMax-M2.7",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "minimax-m2.7__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "minimax-m2.5",
+      "display_name": "MiniMax-M2.5",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "minimax-m2.5__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "minimax-m2.1",
+      "display_name": "MiniMax-M2.1",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "minimax-m2.1__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "minimax-m2",
+      "display_name": "MiniMax-M2",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "minimax-m2__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "glm-5.1",
+      "display_name": "GLM-5.1",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "glm-5.1__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "glm-5v-turbo",
+      "display_name": "GLM-5V-Turbo",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "glm-5v-turbo__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "glm-5",
+      "display_name": "GLM-5",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "glm-5__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "glm-4.7",
+      "display_name": "GLM-4.7",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "glm-4.7__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "glm-4.7-auto",
+      "display_name": "",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "glm-4.7-auto__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "glm-4.6",
+      "display_name": "GLM-4.6",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "glm-4.6__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "DeepSeek-V4-Pro",
+      "display_name": "DeepSeek-V4-Pro",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "DeepSeek-V4-Pro__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "DeepSeek-V4-Flash",
+      "display_name": "DeepSeek-V4-Flash",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "is_beta": true,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "DeepSeek-V4-Flash__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "deepseek-V3.1",
+      "display_name": "DeepSeek-V3.1-Terminus",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "deepseek-V3.1__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "kimi-k2.6",
+      "display_name": "Kimi-K2.6",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "is_beta": false,
+      "max_mode": true,
+      "model_details": [
+        {
+          "model_name": "kimi-k2.6__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "kimi-k2.5",
+      "display_name": "Kimi-K2.5",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "is_beta": false,
+      "max_mode": true,
+      "model_details": [
+        {
+          "model_name": "kimi-k2.5__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "kimi-k2",
+      "display_name": "Kimi-K2-0905",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "kimi-k2__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "qwen-3.6-plus",
+      "display_name": "Qwen3.6-Plus",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "qwen-3.6-plus__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "qwen-3.5",
+      "display_name": "Qwen3.5-Plus",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "qwen-3.5__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "qwen3-coder",
+      "display_name": "Qwen3-Coder-Next",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "max_mode": false,
+      "model_details": [
+        {
+          "model_name": "openai_qwen3-coder-plus__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_placeholder",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_placeholder__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_200k_text",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_200k_text__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_200k",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_200k__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_gemini",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_gemini__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_kimi",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_placeholder__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_vercel",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_placeholder__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_vercel_gemini",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_placeholder__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_no-fc",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_no-fc__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_gpt-5",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_gpt-5__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_deepseek_chat",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_deepseek_chat__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_deepseek_reasoner",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_deepseek_reasoner__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "custom_model_deepseek_v4",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "custom_model_deepseek_reasoner__dev",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "summary",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "Doubao_1_6",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "fast_apply",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "fast_apply",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "fast_apply_new",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "fast_apply_new",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "title_generation",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "no_thinking_model",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "input_optimization",
+      "display_name": "",
+      "model_capability": "",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "no_thinking_model",
+          "encrypted_params": "{\"RequestPin\":\"527855383966366e4d5444465963556f5a637171\",\"RequestAt\":\"1778144449..."
+        }
+      ]
+    },
+    {
+      "config_name": "Glm-5.1",
+      "display_name": "Glm-5.1",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "Glm-5.1",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "GLM-5.1",
+      "display_name": "GLM-5.1",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "GLM-5.1",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "doubao-seed-2-0-code",
+      "display_name": "doubao-seed-2-0-code",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "doubao-seed-2-0-code",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "glm-5.1",
+      "display_name": "glm-5.1",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "glm-5.1",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "doubao-seed-2.0-code",
+      "display_name": "doubao-seed-2.0-code",
+      "model_capability": "chat_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "doubao-seed-2.0-code",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "doubao-seed-2-0-pro-260215",
+      "display_name": "Doubao-Seed-2.0-Pro",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "doubao-seed-2-0-pro-260215",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "doubao-seed-2-0-code-preview-260215",
+      "display_name": "Doubao-Seed-2.0-Code",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "doubao-seed-2-0-code-preview-260215",
+          "encrypted_params": null
+        }
+      ]
+    },
+    {
+      "config_name": "doubao-seed-2-0-code-preview-260215",
+      "display_name": "Doubao-Seed-2.0-Code",
+      "model_capability": "reasoning_model",
+      "is_default": false,
+      "model_details": [
+        {
+          "model_name": "doubao-seed-2-0-code-preview-260215",
+          "encrypted_params": null
+        }
+      ]
+    }
+  ]
+}

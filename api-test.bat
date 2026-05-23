@@ -2,7 +2,7 @@
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
-set API_BASE=http://localhost:9900
+set API_BASE=http://localhost:19900
 set API_KEY=trae-local-api-key
 
 :menu
@@ -17,19 +17,26 @@ echo  2. Chat (Stream) - glm-5.1
 echo  3. Chat (Stream) - deepseek-v3
 echo  4. Chat (Non-Stream)
 echo  5. Chat with solo_coder (Reasoning)
+echo  6. Chat with deepseek-r1 (Reasoning)
+echo.
+echo  [Agent - Auto Tool Calling]
+echo  7. Agent Chat (Stream) - auto tools
+echo  8. Agent Chat - Read File
+echo  9. Agent Chat - Search Internet
 echo.
 echo  [File Output]
-echo  6. Generate File (MD/HTML/etc)
-echo  7. Chat + Save to File (Stream)
-echo  8. List Workspace Files
-echo  9. Read File Content
+echo  10. Generate File (MD/HTML/etc)
+echo  11. Chat + Save to File (Stream)
+echo  12. List Workspace Files
+echo  13. Read File Content
 echo.
 echo  [Tools]
-echo  10. Check Server Status
-echo  11. List Available Models
-echo  12. Encrypt Text
-echo  13. Decrypt Text
-echo  14. Custom Request
+echo  14. Check Server Status
+echo  15. List Available Models
+echo  16. Get Model Details
+echo  17. List Agent Tools
+echo  18. Check Auth / Decrypt Status
+echo  19. Custom Request
 echo  0. Exit
 echo.
 echo ========================================
@@ -40,15 +47,20 @@ if "%choice%"=="2" goto chat_glm
 if "%choice%"=="3" goto chat_deepseek
 if "%choice%"=="4" goto chat_nonstream
 if "%choice%"=="5" goto chat_solo
-if "%choice%"=="6" goto gen_file
-if "%choice%"=="7" goto chat_save
-if "%choice%"=="8" goto list_files
-if "%choice%"=="9" goto read_file
-if "%choice%"=="10" goto status
-if "%choice%"=="11" goto models
-if "%choice%"=="12" goto encrypt
-if "%choice%"=="13" goto decrypt
-if "%choice%"=="14" goto custom
+if "%choice%"=="6" goto chat_r1
+if "%choice%"=="7" goto agent_chat
+if "%choice%"=="8" goto agent_read
+if "%choice%"=="9" goto agent_search
+if "%choice%"=="10" goto gen_file
+if "%choice%"=="11" goto chat_save
+if "%choice%"=="12" goto list_files
+if "%choice%"=="13" goto read_file
+if "%choice%"=="14" goto status
+if "%choice%"=="15" goto models
+if "%choice%"=="16" goto model_details
+if "%choice%"=="17" goto list_tools
+if "%choice%"=="18" goto auth_status
+if "%choice%"=="19" goto custom
 if "%choice%"=="0" goto end
 goto menu
 
@@ -97,6 +109,61 @@ echo.
 set /p msg="You: "
 echo.
 curl -N "%API_BASE%/v1/chat/completions" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"%msg%\"}],\"stream\":true,\"function\":\"solo_coder\"}"
+echo.
+echo.
+pause
+goto menu
+
+:chat_r1
+echo.
+set /p msg="You: "
+echo.
+curl -N "%API_BASE%/v1/chat/completions" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"model\":\"deepseek-r1\",\"messages\":[{\"role\":\"user\",\"content\":\"%msg%\"}],\"stream\":true}"
+echo.
+echo.
+pause
+goto menu
+
+:agent_chat
+echo.
+echo Agent Chat - AI auto-detects and calls tools
+echo ------------------------------------------------
+echo.
+set /p msg="You: "
+echo.
+echo [Agent processing - may call tools automatically...]
+echo.
+curl -N "%API_BASE%/v1/chat/agent" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"%msg%\"}],\"stream\":true}"
+echo.
+echo.
+pause
+goto menu
+
+:agent_read
+echo.
+echo Agent Read File - Ask AI to read a file for you
+echo -------------------------------------------------
+echo.
+set /p filepath="File path: "
+echo.
+echo [Agent will read the file and summarize...]
+echo.
+curl -N "%API_BASE%/v1/chat/agent" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"Please read the file %filepath% and tell me what it contains.\"}],\"stream\":true}"
+echo.
+echo.
+pause
+goto menu
+
+:agent_search
+echo.
+echo Agent Search - Ask AI to search the internet
+echo ----------------------------------------------
+echo.
+set /p query="Search query: "
+echo.
+echo [Agent will search the internet...]
+echo.
+curl -N "%API_BASE%/v1/chat/agent" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"model\":\"auto\",\"messages\":[{\"role\":\"user\",\"content\":\"Please search the internet for: %query%\"}],\"stream\":true}"
 echo.
 echo.
 pause
@@ -183,21 +250,39 @@ echo.
 pause
 goto menu
 
-:encrypt
+:model_details
 echo.
-set /p text="Enter text to encrypt: "
+set /p func="Function (default: chat_v3): "
+if "%func%"=="" set func=chat_v3
 echo.
-curl -s "%API_BASE%/v1/encrypt" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"text\":\"%text%\"}"
+echo [Model Details for %func%]
+echo.
+curl -s "%API_BASE%/v1/models/detail?function=%func%" -H "Authorization: Bearer %API_KEY%"
 echo.
 echo.
 pause
 goto menu
 
-:decrypt
+:list_tools
 echo.
-set /p enc="Enter encrypted string: "
+echo [Available Agent Tools]
 echo.
-curl -s "%API_BASE%/v1/decrypt" -H "Authorization: Bearer %API_KEY%" -H "Content-Type: application/json" -d "{\"encrypted\":\"%enc%\"}"
+curl -s "%API_BASE%/v1/tools" -H "Authorization: Bearer %API_KEY%"
+echo.
+echo.
+pause
+goto menu
+
+:auth_status
+echo.
+echo [Auth / Decrypt Status]
+echo.
+curl -s "%API_BASE%/v1/status" -H "Authorization: Bearer %API_KEY%"
+echo.
+echo.
+echo [Testing Trae CN Decrypt Module]
+echo.
+node -e "try{const d=require('./src/trae-decrypt');const r=d.decryptAuthData();console.log('Decrypt: OK');console.log('Edition:',r.host?'CN':'SG');console.log('User:',r.account||r.userId||'N/A');console.log('Token exp:',r.expiredAt||'N/A')}catch(e){console.log('Decrypt error:',e.message)}"
 echo.
 echo.
 pause

@@ -14,7 +14,7 @@
 
 **工作目录**：`d:\_program\Trae\zx-test\`
 
-**当前状态**：**API 服务器已完全可用** - CN 版和 SG 版均支持流式响应。
+**当前状态**：**API 服务器已完全可用** - CN 版和 SG 版均支持流式响应，CN 版加密已破解。
 
 ---
 
@@ -25,7 +25,7 @@
 | 特性 | CN 版（国内版） | SG 版（国际版） |
 |------|---------------|---------------|
 | 数据目录 | `%APPDATA%\Trae CN` | `%APPDATA%\Trae` |
-| 认证存储 | 加密（自定义 "tc" 格式） | 明文 JSON |
+| 认证存储 | 加密（自定义 "tc" 格式，**已破解**） | 明文 JSON |
 | API 主机 | `trae-api-cn.mchost.guru` | `coresg-normal.trae.ai` |
 | 认证方案 | `Cloud-IDE-JWT` | `Cloud-IDE-JWT` |
 | IDE 版本 | 3.3.55 | 3.5.51 |
@@ -122,11 +122,13 @@ data:{"finish_reason":"stop"}
 | 尝试 | 方法 | 结果 | 状态 |
 |------|------|------|------|
 | 1 | 直接读取 SG 版 storage.json | 成功提取明文 JWT token | 已解决 |
-| 2 | 读取 CN 版 storage.json | 认证数据使用自定义 "tc" 前缀加密 | 受阻 |
-| 3 | 使用 Local State 密钥进行 AES-256-GCM 解密 | 自定义加密格式（v0x1005）不兼容 | 受阻 |
-| 4 | 通过 PowerShell 进行 DPAPI 解密 | Trae 使用 Electron safeStorage，非标准 DPAPI | 受阻 |
-| 5 | 从 ai-agent 日志提取 token | 在 stdout 日志中找到 JWT token | 已解决 |
+| 2 | 读取 CN 版 storage.json | 认证数据使用自定义 "tc" 前缀加密 | **已解决** |
+| 3 | 使用 Local State 密钥进行 AES-256-GCM 解密 | 自定义加密格式（v0x1005）不兼容 | 已跳过 |
+| 4 | 通过 PowerShell 进行 DPAPI 解密 | Trae 使用 Electron safeStorage，非标准 DPAPI | 已跳过 |
+| 5 | 从 ai-agent 日志提取 token | 在 stdout 日志中找到 JWT token | 已解决（备选） |
 | 6 | 通过 ExchangeToken API 刷新 token | 成功实现 JWT 刷新 | 已解决 |
+| 7 | **逆向分析 "tc" 加密格式** | **发现 AES-128-CBC + SHA-512 + 硬编码 XOR 盐值** | **已解决** |
+| 8 | **实现 trae-decrypt.js 解密模块** | **CN 版 storage.json 直接解密成功** | **已解决** |
 
 ### 阶段 2：API 请求格式探索
 
@@ -160,7 +162,7 @@ data:{"finish_reason":"stop"}
 ### 5.1 认证
 - JWT token 格式：`Cloud-IDE-JWT <token>`
 - Token 刷新端点：`/cloudide/api/v3/trae/oauth/ExchangeToken`
-- 刷新参数：ClientID=`ono9krqynydwx5`, RefreshToken, ClientSecret=`-`
+- 刷新参数：ClientID=`<YOUR_CLIENT_ID>`, RefreshToken, ClientSecret=`-`
 - Token 有效期：约 14 天
 
 ### 5.2 必需的 HTTP 请求头
@@ -169,7 +171,7 @@ Content-Type: application/json
 Authorization: Cloud-IDE-JWT <token>
 X-Cloudide-Token: <token>
 x-uid: <user_id>
-x-app-id: 6eefa01c-1036-4c7e-9ca5-d891f63bfcd8
+x-app-id: <YOUR_APP_ID>
 x-device-id: <device_id>
 x-machine-id: <machine_id>
 x-ide-version: 3.3.55
@@ -222,11 +224,12 @@ Accept: text/event-stream
 ### 6.1 核心源文件（src/）
 | 文件 | 用途 | 状态 |
 |------|------|------|
-| `auth.js` | 认证与 token 管理 | 可用（双版本） |
+| `auth.js` | 认证与 token 管理 | 可用（双版本 + CN 解密） |
 | `trae-client.js` | 核心 API 客户端，含 `llmUtilsChat` | 可用 |
+| `trae-decrypt.js` | Trae CN "tc" 加密格式解密（AES-128-CBC） | 可用 |
 | `server.js` | OpenAI 兼容 API 服务器 | 可用 |
 | `openai-format.js` | 响应格式转换，含 SSE 解析器 | 可用 |
-| `crypto.js` | AES-256-GCM 加解密工具 | 可用 |
+| `crypto.js` | AES-256-GCM 加解密工具（API 传输加密） | 可用 |
 | `uuid.js` | UUID 生成工具 | 可用 |
 
 ### 6.2 测试脚本（关键）
@@ -261,11 +264,19 @@ Accept: text/event-stream
 - 已实现指数退避重试机制（最多 3 次）
 - 典型冷却时间：30-60 秒
 
-### 7.2 CN 版认证加密
+### 7.2 CN 版认证加密（已解决）
+
 - CN 版 `storage.json` 使用自定义 "tc" 前缀加密（版本 0x1005）
-- 无法使用标准 AES-256-GCM 或 DPAPI 解密
-- 替代方案：从 ai-agent 进程日志提取 token
-- 备选方案：使用 SG 版（明文存储认证数据）
+- **已破解**：加密算法为 AES-128-CBC + SHA-512 + 硬编码 XOR 盐值
+- 解密流程：
+  1. Base64 解码 → 检测 "tc" 前缀（0x74 0x63 0x05 0x10 0x00 0x00）
+  2. 提取 32 字节随机数 + 加密数据
+  3. SHA-512(randomBytes) 与 XOR 盐值（SALT_A ^ SALT_B）组合后再次 SHA-512
+  4. 取前 16 字节为 AES 密钥，16-32 字节为 IV
+  5. AES-128-CBC 解密 → 前 64 字节为 SHA-512 哈希（验证），剩余为明文
+- 私有加密类型（AES_PRIVATE）使用另一组盐值（SALT_C ^ SALT_D）
+- 实现：`src/trae-decrypt.js` 模块
+- 备选方案：从 ai-agent 进程日志提取 token（`extract-token.bat`）
 
 ### 7.3 模型选择
 - `inline_chat` 函数使用服务器默认模型
@@ -290,31 +301,61 @@ Accept: text/event-stream
 - **Node.js**：v24.12.0
 - **代理**：HTTP localhost:1085/7891，SOCKS5 localhost:1083
 - **工作目录**：`d:\_program\Trae\zx-test\`
-- **API 服务器**：http://localhost:9900
+- **API 服务器**：http://localhost:19900
 
 ---
 
 ## 9. 时间线
 
-| 日期 | 里程碑 |
+| 时间 | 里程碑 |
 |------|--------|
-| 2026-05-03 | 项目启动，初始分析 |
-| 2026-05-04 | SG 版认证提取，首次 API 测试 |
-| 2026-05-05 | CN 版分析，加密发现 |
-| 2026-05-06 | 模型配置发现，测试脚本 v2-v4 |
-| 2026-05-07 | summary config 阻碍，多种测试方案 |
-| 2026-05-07 | `/api/ide/v1/chat` 端点可用，`get_detail_param` 返回完整配置 |
-| 2026-05-07 | **突破：`llm_utils_chat` + `inline_chat` 完美工作** |
-| 2026-05-07 | **API 服务器 v2.0 完全可用，支持流式传输** |
-| 2026-05-07 | **CN 和 SG 版端到端验证通过** |
-| 2026-05-07 | 添加指数退避重试、模型自动选择、完善文档 |
-| 2026-05-07 | 修复非流式响应（改用流式收集后一次性返回） |
-| 2026-05-07 | 修复 configName 变量引用错误 |
-| 2026-05-07 | 过滤 "Building prompt" 调试信息 |
-| 2026-05-07 | **模型选择测试：通过 model 字段指定模型全部通过** |
-| 2026-05-07 | **发现 config_name 在 llm_utils_chat 端点中不受支持** |
-| 2026-05-07 | **41 项端到端测试全部通过** |
+| 05-03 10:00 | 项目启动，初始分析 Trae 架构 |
+| 05-03 14:00 | 发现 Electron + Chromium 架构，定位 ai-agent 进程 |
+| 05-03 18:00 | 分析 IPC 通信机制，发现 JSON-RPC 协议 |
+| 05-04 09:00 | SG 版 storage.json 明文认证提取成功 |
+| 05-04 11:00 | 首次 API 测试，发现必需请求头格式 |
+| 05-04 15:00 | 测试 `/api/ide/v1/chat` 端点，遇到速率限制 |
+| 05-04 20:00 | 实现 ExchangeToken 刷新机制 |
+| 05-05 09:00 | CN 版分析，发现 "tc" 自定义加密格式（v0x1005） |
+| 05-05 12:00 | 尝试 AES-256-GCM 解密失败（nonce/tag 偏移不匹配） |
+| 05-05 16:00 | 尝试 DPAPI 解密，发现 Electron safeStorage 非标准格式 |
+| 05-05 20:00 | 从 ai-agent 日志中首次提取到 JWT token |
+| 05-06 09:00 | DLL 逆向分析，搜索导出函数和字符串常量 |
+| 05-06 14:00 | 发现 `llm_utils_chat` 端点字符串 |
+| 05-06 18:00 | 测试脚本 v2-v4，逐步修复请求格式 |
+| 05-07 09:00 | summary config 阻碍，尝试多种方案 |
+| 05-07 10:30 | `/api/ide/v1/chat` 端点可用，`get_detail_param` 返回完整配置 |
+| 05-07 11:00 | **突破：`llm_utils_chat` + `inline_chat` 完美工作** |
+| 05-07 12:00 | **API 服务器 v2.0 完全可用，支持流式传输** |
+| 05-07 13:00 | **CN 和 SG 版端到端验证通过** |
+| 05-07 14:00 | 添加指数退避重试、模型自动选择、完善文档 |
+| 05-07 15:00 | 修复非流式响应（改用流式收集后一次性返回） |
+| 05-07 15:30 | 修复 configName 变量引用错误 |
+| 05-07 16:00 | 过滤 "Building prompt" 调试信息 |
+| 05-07 17:00 | **模型选择测试：通过 model 字段指定模型全部通过** |
+| 05-07 17:30 | **发现 config_name 在 llm_utils_chat 端点中不受支持** |
+| 05-07 18:00 | **41 项端到端测试全部通过** |
+| 05-07 20:00 | 创建 api-test.bat 和 api-test-advanced.bat 测试工具 |
+| 05-08 01:00 | 用户测试成功，创建 git 仓库 |
+| 05-08 02:00 | 文件分门别类整理，创建 FILE_LIST.md |
+| 05-08 03:00 | 实现文件输出功能（`/v1/chat/file` + `save_to` 参数） |
+| 05-08 09:00 | 从 completion.log 发现明文 JWT token（关键突破） |
+| 05-08 09:30 | 创建 extract-completion-jwt.js 自动提取脚本 |
+| 05-08 10:00 | 修复 auth.js manual token 模式（解析 JWT exp，跳过刷新） |
+| 05-08 10:30 | 发现 Trae sandbox 限制文件写入范围 |
+| 05-08 11:00 | 实现 OUTPUT_SYNC_DIR + syncFileToOutput() 同步机制 |
+| 05-08 11:30 | 添加 /v1/sync/pending 和 /v1/sync/clear 端点 |
+| 05-08 12:00 | 创建 sync-output.bat 外部同步脚本 |
+| 05-08 12:30 | 创建 extract-token.bat 一键提取工具 |
+| 05-08 13:00 | **文件输出 + 同步功能全部测试通过** |
+| 05-08 14:00 | 更新 README.md、API.md、FILE_LIST.md 文档 |
+| 05-08 14:30 | Git 提交所有更改 |
+| 05-08 15:00 | **逆向分析 "tc" 加密格式，发现 AES-128-CBC + SHA-512 + XOR 盐值** |
+| 05-08 16:00 | **实现 trae-decrypt.js 解密模块，CN 版 storage.json 直接解密成功** |
+| 05-08 16:30 | **更新 auth.js 集成解密模块，CN 版认证完全自动化** |
+| 05-08 17:00 | 更新 api-test.bat 系列文件，添加解密测试功能 |
+| 05-08 17:30 | 更新 README/PROGRESS/ARCHITECTURE/API/FILE_LIST 文档 |
 
 ---
 
-*最后更新：2026-05-07（会话 4 - 模型选择修复 + 完整测试通过 + 文档完善）*
+*最后更新：2026-05-08 17:30（会话 6 - CN 版加密破解 + 解密模块 + 文档更新）*

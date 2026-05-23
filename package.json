@@ -9,6 +9,7 @@
     "test": "node scripts/misc-test/test-api-server.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.98.0",
     "axios": "^1.16.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
