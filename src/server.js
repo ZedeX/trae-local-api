@@ -1046,6 +1046,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
         while (continueCount <= MAX_CONTINUES) {
           // Always suppress stop events from llmUtilsChunkToAnthropic
           // We'll send them manually after checking if we need to continue
+          // This must be set BEFORE processStream so the done event handler knows not to emit
           if (streamState) {
             streamState.suppressStopEvents = true;
           }
@@ -1053,7 +1054,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
           await processStream(currentMessages);
 
           const elapsed = Date.now() - startTime;
-          console.log(`[anthropic ${reqId}] stream ended: ${elapsed}ms, stopReason=${streamState?.stopReason}, continueCount=${continueCount}`);
+          console.log(`[anthropic ${reqId}] stream ended: ${elapsed}ms, stopReason=${streamState?.stopReason}, suppressStopEvents=${streamState?.suppressStopEvents}, continueCount=${continueCount}`);
 
           // Check if we should auto-continue
           if (AUTO_CONTINUE && streamState && streamState.messageStopped && isResponseTruncated(streamState) && continueCount < MAX_CONTINUES) {
@@ -1083,7 +1084,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
               toolCallBuffer: '',
               inToolCall: false,
               pendingToolCalls: [],
-              suppressStopEvents: true, // will be set again at top of loop
+              suppressStopEvents: true,
               stopReason: null
             };
 
@@ -1091,8 +1092,9 @@ app.post('/v1/messages', authenticate, async (req, res) => {
             continue;
           }
 
-          // Response is complete or max continues reached - send final events
-          if (streamState && streamState.messageStopped && !res.writableEnded) {
+          // Response is complete or max continues reached
+          // Only send final events if they were suppressed (not already sent by llmUtilsChunkToAnthropic)
+          if (streamState && streamState.messageStopped && streamState.suppressStopEvents && !res.writableEnded) {
             const finalReason = streamState.hasToolUse ? 'tool_use' : (streamState.stopReason || 'end_turn');
             sendEvent('message_delta', createAnthropicMessageDelta(finalReason, { output_tokens: streamState.outputTokenCount || 0 }));
             sendEvent('message_stop', { type: 'message_stop' });

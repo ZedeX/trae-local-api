@@ -429,7 +429,7 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       toolCallBuffer: '',     // buffer for detecting <toolcall> tags in text stream
       inToolCall: false,      // currently inside a <toolcall> tag
       pendingToolCalls: [],   // extracted tool calls waiting to be emitted
-      suppressStopEvents: false, // if true, don't emit message_delta/message_stop (for auto-continue)
+      suppressStopEvents: true, // always suppress - outer loop controls when to emit stop events
       stopReason: null,       // last stop reason from done event
     };
   }
