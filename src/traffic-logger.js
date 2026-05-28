@@ -1,15 +1,17 @@
 /**
  * Traffic Logger - 记录 Trae API 与上游服务器之间的所有请求和响应
  *
- * 日志保存到 logs/ 目录，按日期组织：
- *   logs/2026-05-23/
- *     req-001-llmUtilsChat.json   - 完整的请求+响应记录
- *     req-002-chatCompletion.json
- *     ...
+ * 日志保存到 logs/ 目录，按日期和workspace组织：
+ *   logs/2026-05-25/
+ *     default/
+ *       req-000001-llmUtilsChat.json
+ *     d-zProject-traelocalapi/
+ *       req-000002-llmUtilsChat.json
  *
  * 每个文件包含：
  *   {
- *     "id": "req-001",
+ *     "id": "req-000001",
+ *     "workspace": "default",
  *     "timestamp": "2026-05-23T10:30:00.000Z",
  *     "type": "llmUtilsChat",
  *     "request": {
@@ -20,11 +22,11 @@
  *     },
  *     "response": {
  *       "status": 200,
- *       "chunks": [ ... ],       // 原始 SSE 事件列表
- *       "fullContent": "...",    // 聚合的文本内容
- *       "fullReasoning": "...",  // 聚合的推理内容
- *       "tokenUsage": { ... },   // token 使用量
- *       "duration_ms": 5230      // 总耗时
+ *       "chunks": [ ... ],
+ *       "fullContent": "...",
+ *       "fullReasoning": "...",
+ *       "tokenUsage": { ... },
+ *       "duration_ms": 5230
  *     }
  *   }
  */
@@ -34,23 +36,28 @@ const path = require('path');
 
 const LOGS_DIR = path.join(__dirname, '..', 'logs');
 
-// 请求计数器，每天重置
+// 请求计数器，每天+workspace重置
 let dailyCounter = 0;
 let currentDate = '';
+let currentWorkspace = '';
 
 // 活跃的请求记录（流式响应时暂存）
 const activeLogs = new Map();
 
 /**
- * 获取今天的日志目录
+ * 获取今天的日志目录（按workspace分目录）
  */
-function getLogDir() {
+function getLogDir(workspace) {
   const today = new Date().toISOString().split('T')[0];
-  if (today !== currentDate) {
+  const ws = workspace || 'default';
+  // Sanitize workspace for filesystem
+  const wsSafe = ws.replace(/[<>:"/\\|?*]/g, '_').replace(/[^a-zA-Z0-9_\-\.\u4e00-\u9fff]/g, '-').substring(0, 64) || 'default';
+  if (today !== currentDate || wsSafe !== currentWorkspace) {
     currentDate = today;
+    currentWorkspace = wsSafe;
     dailyCounter = 0;
   }
-  const dir = path.join(LOGS_DIR, today);
+  const dir = path.join(LOGS_DIR, today, wsSafe);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -102,10 +109,11 @@ function sanitizeHeaders(headers) {
  * @param {object} params - { url, method, headers, body }
  * @returns {string} logId - 用于后续记录响应
  */
-function logRequest(type, params) {
+function logRequest(type, params, workspace) {
   const logId = generateReqId();
   const entry = {
     id: logId,
+    workspace: workspace || 'default',
     timestamp: new Date().toISOString(),
     type: type,
     request: {
@@ -183,7 +191,12 @@ function logResponseContent(logId, content, reasoning) {
 function logTokenUsage(logId, usage) {
   const active = activeLogs.get(logId);
   if (active) {
-    active.entry.response.tokenUsage = usage;
+    // Merge instead of replace — Trae SSE may send multiple token_usage events
+    // with partial data (e.g. completion_tokens only in one, full data in another)
+    if (!active.entry.response.tokenUsage) {
+      active.entry.response.tokenUsage = {};
+    }
+    Object.assign(active.entry.response.tokenUsage, usage);
   }
 }
 
@@ -216,7 +229,7 @@ function finalizeLog(logId, extras) {
     Object.assign(active.entry.response, extras);
   }
 
-  const logDir = getLogDir();
+  const logDir = getLogDir(active.entry.workspace);
   const filename = `${logId}-${active.entry.type}.json`;
   const filePath = path.join(logDir, filename);
 
@@ -251,6 +264,149 @@ function getActiveCount() {
   return activeLogs.size;
 }
 
+/**
+ * 获取活跃请求详情（用于仪表盘）
+ */
+function getActiveRequests() {
+  const requests = [];
+  for (const [logId, active] of activeLogs) {
+    // 从 chunks 中提取排队位置
+    let queuePosition = 0;
+    let queueTiming = 0;
+    const chunks = active.entry.response.chunks;
+    
+    // 找最新的排队位置
+    for (let i = chunks.length - 1; i >= 0; i--) {
+      const c = chunks[i];
+      if (c.event === 'request_wait_in_queue') {
+        const data = c.data || {};
+        queuePosition = data.data?.position || data.position || 0;
+        break;
+      }
+    }
+    
+    // 从 timing_cost 提取排队时间
+    for (const c of chunks) {
+      if (c.event === 'timing_cost') {
+        const data = c.data || {};
+        queueTiming = data.queue_timing || data.data?.queue_timing || 0;
+        break;
+      }
+    }
+    
+    requests.push({
+      id: logId,
+      workspace: active.entry.workspace,
+      type: active.entry.type,
+      startTime: new Date(active.startTime).toISOString(),
+      elapsed_ms: Date.now() - active.startTime,
+      chunkCount: chunks.length,
+      queuePosition: queuePosition,
+      queueTiming: queueTiming
+    });
+  }
+  return requests;
+}
+
+/**
+ * 获取所有日志目录的列表
+ */
+function getLogDirectories() {
+  const result = [];
+  if (!fs.existsSync(LOGS_DIR)) return result;
+  const dates = fs.readdirSync(LOGS_DIR).filter(d => {
+    const dp = path.join(LOGS_DIR, d);
+    return fs.statSync(dp).isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(d);
+  });
+  for (const date of dates.sort().reverse()) {
+    const dateDir = path.join(LOGS_DIR, date);
+    const workspaces = fs.readdirSync(dateDir).filter(w => fs.statSync(path.join(dateDir, w)).isDirectory());
+    for (const ws of workspaces.sort()) {
+      const wsDir = path.join(dateDir, ws);
+      const files = fs.readdirSync(wsDir).filter(f => f.endsWith('.json'));
+      result.push({ date, workspace: ws, fileCount: files.length, path: wsDir });
+    }
+  }
+  return result;
+}
+
+/**
+ * 从 tokenUsage 对象中安全提取字段值
+ * tokenUsage 可能是 {prompt_tokens: N, completion_tokens: N, total_tokens: N}
+ * 也可能被 Trae SSE 嵌套为 {type:"token_usage", data:{prompt_tokens:N, ...}}
+ */
+function extractTokenField(tokenUsage, snakeKey, camelKey) {
+  if (!tokenUsage || typeof tokenUsage !== 'object') return 0;
+  // Direct access (snake_case)
+  if (typeof tokenUsage[snakeKey] === 'number') return tokenUsage[snakeKey];
+  // Direct access (camelCase)
+  if (typeof tokenUsage[camelKey] === 'number') return tokenUsage[camelKey];
+  // Nested: {data: {prompt_tokens: N, ...}} (Trae SSE wraps token data)
+  if (tokenUsage.data && typeof tokenUsage.data === 'object') {
+    if (typeof tokenUsage.data[snakeKey] === 'number') return tokenUsage.data[snakeKey];
+    if (typeof tokenUsage.data[camelKey] === 'number') return tokenUsage.data[camelKey];
+    // Double-nested: {data: {data: {prompt_tokens: N, ...}}}
+    if (tokenUsage.data.data && typeof tokenUsage.data.data === 'object') {
+      if (typeof tokenUsage.data.data[snakeKey] === 'number') return tokenUsage.data.data[snakeKey];
+      if (typeof tokenUsage.data.data[camelKey] === 'number') return tokenUsage.data.data[camelKey];
+    }
+  }
+  return 0;
+}
+
+/**
+ * 读取最近的日志条目（用于仪表盘）
+ */
+function readRecentLogs(workspace, limit = 50, offset = 0) {
+  const entries = [];
+  const dirs = getLogDirectories();
+  for (const dir of dirs) {
+    if (workspace && dir.workspace !== workspace) continue;
+    const files = fs.readdirSync(dir.path).filter(f => f.endsWith('.json')).sort().reverse();
+    for (const fname of files) {
+      if (entries.length >= offset + limit) break;
+      try {
+        const content = fs.readFileSync(path.join(dir.path, fname), 'utf-8');
+        const entry = JSON.parse(content);
+        // Lightweight: exclude heavy arrays from list view
+        entries.push({
+          id: entry.id,
+          workspace: entry.workspace,
+          timestamp: entry.timestamp,
+          type: entry.type,
+          model: entry.request?.body?.model || entry.request?.body?.function || 'auto',
+          status: entry.response?.status || 0,
+          duration_ms: entry.response?.duration_ms,
+          tokens: extractTokenField(entry.response?.tokenUsage, 'total_tokens', 'totalTokens'),
+          promptTokens: extractTokenField(entry.response?.tokenUsage, 'prompt_tokens', 'promptTokens'),
+          completionTokens: extractTokenField(entry.response?.tokenUsage, 'completion_tokens', 'completionTokens'),
+          contentLength: (entry.response?.fullContent || '').length,
+          chunkCount: (entry.response?.chunks || []).length
+        });
+      } catch (e) {
+        // Skip corrupt files
+      }
+    }
+    if (entries.length >= offset + limit) break;
+  }
+  return entries.slice(offset, offset + limit);
+}
+
+/**
+ * 读取完整的单条日志
+ */
+function readLogEntry(date, workspace, logId) {
+  const dir = path.join(LOGS_DIR, date, workspace);
+  const fname = `${logId}.json`;
+  const fpath = path.join(dir, fname);
+  if (!fs.existsSync(fpath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(fpath, 'utf-8'));
+  } catch (e) {
+    return null;
+  }
+}
+
 module.exports = {
   logRequest,
   logResponseStatus,
@@ -260,5 +416,10 @@ module.exports = {
   logResponseData,
   logError,
   finalizeLog,
-  getActiveCount
+  getActiveCount,
+  getActiveRequests,
+  getLogDirectories,
+  readRecentLogs,
+  readLogEntry,
+  extractTokenField
 };

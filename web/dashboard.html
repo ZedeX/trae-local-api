@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trae Local API - Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2358a6ff'/%3E%3Ctext x='32' y='46' text-anchor='middle' font-family='sans-serif' font-weight='700' font-size='38' fill='white'%3ET%3C/text%3E%3C/svg%3E">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+/* ===== Theme Variables ===== */
+:root {
+  --bg: #0d1117;
+  --bg-panel: #161b22;
+  --border: #30363d;
+  --border-light: #21262d;
+  --text: #c9d1d9;
+  --text-muted: #8b949e;
+  --text-dim: #484f58;
+  --accent: #58a6ff;
+  --accent-bg: rgba(88,166,255,0.1);
+  --green: #3fb950;
+  --green-bg: #1a3a2a;
+  --red: #f85149;
+  --red-bg: #3a1a1a;
+  --yellow: #d29922;
+  --yellow-bg: #3a2a1a;
+  --purple: #a371f7;
+  --code-bg: #0d1117;
+  --card-shadow: none;
+  --modal-bg: rgba(0,0,0,0.7);
+  --table-hover: #1c2129;
+  --input-bg: #0d1117;
+  --btn-bg: #21262d;
+  --btn-hover-bg: #30363d;
+  --header-bg: #161b22;
+  --badge-text-color: #c9d1d9;
+}
+.theme-light {
+  --bg: #ffffff;
+  --bg-panel: #f6f8fa;
+  --border: #d0d7de;
+  --border-light: #e8ecf1;
+  --text: #1f2328;
+  --text-muted: #656d76;
+  --text-dim: #8c959f;
+  --accent: #0969da;
+  --accent-bg: #ddf4ff;
+  --green: #1a7f37;
+  --green-bg: #dafbe1;
+  --red: #cf222e;
+  --red-bg: #ffebe9;
+  --yellow: #9a6700;
+  --yellow-bg: #fff8c5;
+  --purple: #8250df;
+  --code-bg: #f6f8fa;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --modal-bg: rgba(0,0,0,0.4);
+  --table-hover: #f0f3f6;
+  --input-bg: #ffffff;
+  --btn-bg: #f6f8fa;
+  --btn-hover-bg: #e8ecf1;
+  --header-bg: #f6f8fa;
+  --badge-text-color: #ffffff;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  transition: background 0.3s, color 0.3s;
+}
+.header {
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex; align-items: center; justify-content: space-between;
+  position: sticky; top: 0; z-index: 100;
+}
+.header h1 { font-size: 18px; color: var(--accent); }
+.header .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+.header .status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.header .status-dot.offline { background: var(--red); }
+.header .links { display: flex; align-items: center; gap: 16px; }
+.header .links a { color: var(--text-muted); text-decoration: none; font-size: 13px; }
+.header .links a:hover { color: var(--accent); }
+.header .theme-btn {
+  background: var(--btn-bg); border: 1px solid var(--border);
+  color: var(--text); padding: 4px 10px; border-radius: 6px;
+  font-size: 13px; cursor: pointer; transition: background 0.2s;
+}
+.header .theme-btn:hover { background: var(--btn-hover-bg); }
+
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+/* Stats Row */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+.stat-card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px;
+  box-shadow: var(--card-shadow); transition: background 0.3s, border-color 0.3s;
+}
+.stat-card .label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .value { font-size: 28px; font-weight: 600; color: var(--text); margin-top: 4px; }
+.stat-card .sub { font-size: 12px; color: var(--accent); margin-top: 2px; }
+
+/* Status Bar */
+.status-bar {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 16px; margin-bottom: 20px;
+  display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px;
+  box-shadow: var(--card-shadow); transition: background 0.3s, border-color 0.3s;
+}
+.status-bar .item { display: flex; align-items: center; gap: 6px; }
+.status-bar .item .key { color: var(--text-muted); }
+.status-bar .item .val { color: var(--text); font-weight: 500; }
+.status-bar .item .val.green { color: var(--green); }
+.status-bar .item .val.blue { color: var(--accent); }
+
+/* Row Layout */
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+
+/* Panel */
+.panel {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px;
+  overflow: hidden; box-shadow: var(--card-shadow);
+  transition: background 0.3s, border-color 0.3s;
+}
+.panel-header {
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.panel-header h2 { font-size: 14px; color: var(--text); }
+.panel-body { padding: 16px; }
+
+/* Chart containers */
+.chart-wrap { position: relative; height: 280px; }
+.chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; padding: 8px 12px; color: var(--text-muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+td { padding: 8px 12px; border-bottom: 1px solid var(--border-light); color: var(--text); }
+tr:hover td { background: var(--table-hover); }
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 500;
+}
+.badge.green { background: var(--green-bg); color: var(--green); }
+.badge.blue { background: var(--accent-bg); color: var(--accent); }
+.badge.yellow { background: var(--yellow-bg); color: var(--yellow); }
+.badge.red { background: var(--red-bg); color: var(--red); }
+
+/* Filter Bar */
+.filter-bar {
+  display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap;
+}
+.filter-bar select, .filter-bar input {
+  background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
+  padding: 6px 12px; border-radius: 6px; font-size: 13px; outline: none;
+  transition: border-color 0.2s;
+}
+.filter-bar select:focus, .filter-bar input:focus { border-color: var(--accent); }
+.filter-bar .btn {
+  background: var(--btn-bg); border: 1px solid var(--border); color: var(--text);
+  padding: 6px 14px; border-radius: 6px; font-size: 13px; cursor: pointer;
+  transition: background 0.2s;
+}
+.filter-bar .btn:hover { background: var(--btn-hover-bg); }
+.filter-bar .btn.active { background: var(--accent); border-color: var(--accent); color: var(--badge-text-color); }
+
+/* Active Requests */
+.active-list { max-height: 200px; overflow-y: auto; }
+.active-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--border-light); font-size: 13px;
+  color: var(--text);
+}
+.active-item .spinner {
+  width: 14px; height: 14px; border: 2px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+.active-item .queue-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500;
+  background: var(--yellow-bg); color: var(--yellow);
+}
+.active-item .queue-badge.active {
+  background: var(--red-bg); color: var(--red); animation: pulse 1s ease infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* No data */
+.empty { text-align: center; padding: 40px; color: var(--text-dim); font-size: 14px; }
+
+/* ===== Beautified Modal ===== */
+.modal-overlay {
+  display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--modal-bg); z-index: 200; justify-content: center; align-items: flex-start;
+  padding: 40px 20px; overflow-y: auto;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+.modal-overlay.show { display: flex; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.modal-content {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;
+  max-width: 900px; width: 100%; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  animation: slideUp 0.25s ease;
+  overflow: hidden;
+}
+.modal-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  background: var(--bg-panel);
+}
+.modal-header h2 { font-size: 16px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.modal-header .modal-id { font-size: 12px; color: var(--accent); font-family: 'Cascadia Code', 'Fira Code', monospace; }
+.modal-close {
+  background: none; border: none; color: var(--text-muted); font-size: 22px;
+  cursor: pointer; width: 32px; height: 32px; display: flex; align-items: center;
+  justify-content: center; border-radius: 6px; transition: all 0.2s;
+}
+.modal-close:hover { background: var(--red-bg); color: var(--red); }
+
+/* Modal Tabs */
+.modal-tabs {
+  display: flex; border-bottom: 1px solid var(--border); background: var(--bg-panel);
+}
+.modal-tab {
+  padding: 10px 20px; font-size: 13px; color: var(--text-muted); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: all 0.2s; background: none; border-top: none;
+  border-left: none; border-right: none;
+}
+.modal-tab:hover { color: var(--text); }
+.modal-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+
+.modal-body { padding: 0; max-height: 60vh; overflow-y: auto; }
+.modal-tab-content { display: none; padding: 20px; }
+.modal-tab-content.active { display: block; }
+
+/* Modal Overview Grid */
+.modal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.modal-field { 
+  padding: 10px 12px; background: var(--bg); border-radius: 6px;
+  border: 1px solid var(--border-light);
+}
+.modal-field .f-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+.modal-field .f-value { font-size: 13px; color: var(--text); font-weight: 500; word-break: break-all; }
+.modal-field .f-value.mono { font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px; }
+
+/* Code blocks */
+.modal-body pre {
+  background: var(--code-bg); border: 1px solid var(--border-light); border-radius: 8px;
+  padding: 16px; overflow-x: auto; font-size: 12px; line-height: 1.6;
+  max-height: 500px; overflow-y: auto; font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  color: var(--text); white-space: pre-wrap; word-break: break-word;
+  margin: 0;
+}
+.modal-body .section-title {
+  font-size: 12px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.5px; margin: 16px 0 8px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+}
+.modal-body .section-title::after {
+  content: ''; flex: 1; height: 1px; background: var(--border-light);
+}
+
+/* Token badge in modal */
+.token-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 500;
+  margin: 2px;
+}
+.token-badge.in { background: var(--accent-bg); color: var(--accent); }
+.token-badge.out { background: var(--green-bg); color: var(--green); }
+.token-badge.total { background: var(--purple); color: #fff; opacity: 0.85; }
+
+/* Refresh notice */
+.refresh-notice { font-size: 11px; color: var(--text-dim); text-align: right; }
+.clickable { cursor: pointer; color: var(--accent); text-decoration: underline; }
+
+/* Fallback Settings */
+.toggle-switch {
+  width: 44px; height: 24px; background: var(--border); border-radius: 12px;
+  position: relative; cursor: pointer; transition: background 0.2s;
+}
+.toggle-switch.on { background: var(--green); }
+.toggle-knob {
+  width: 20px; height: 20px; background: #fff; border-radius: 50%;
+  position: absolute; top: 2px; left: 2px; transition: left 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-switch.on .toggle-knob { left: 22px; }
+
+.fb-btn {
+  padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500;
+  cursor: pointer; border: 1px solid var(--border); transition: all 0.2s;
+}
+.fb-btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.fb-btn-primary:hover { opacity: 0.85; }
+.fb-btn-secondary { background: var(--btn-bg); color: var(--text); }
+.fb-btn-secondary:hover { background: var(--btn-hover-bg); }
+
+.fb-mapping-row {
+  display: grid; grid-template-columns: 200px 1fr auto; gap: 8px;
+  align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border-light);
+}
+.fb-mapping-row:hover { background: var(--table-hover); }
+.fb-model-name {
+  font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px;
+  color: var(--accent); font-weight: 500;
+}
+.fb-fallback-list { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.fb-fallback-item {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--accent-bg); color: var(--accent); padding: 3px 10px;
+  border-radius: 12px; font-size: 12px; font-weight: 500;
+}
+.fb-fallback-item .fb-remove {
+  cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.6;
+  margin-left: 2px;
+}
+.fb-fallback-item .fb-remove:hover { opacity: 1; color: var(--red); }
+.fb-fallback-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 10px;
+  font-weight: 700; margin-right: 2px;
+}
+.fb-fallback-num.n1 { background: var(--yellow-bg); color: var(--yellow); }
+.fb-fallback-num.n2 { background: var(--accent-bg); color: var(--accent); }
+.fb-fallback-num.n3 { background: var(--green-bg); color: var(--green); }
+.fb-add-select {
+  background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
+  padding: 3px 8px; border-radius: 12px; font-size: 12px; cursor: pointer;
+  outline: none;
+}
+.fb-add-select:focus { border-color: var(--accent); }
+.fb-current-model {
+  font-size: 11px; color: var(--text-dim); margin-top: 2px;
+}
+
+/* Responsive */
+@media (max-width: 800px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .row { grid-template-columns: 1fr; }
+  .modal-content { max-width: 95vw; }
+  .modal-grid { grid-template-columns: 1fr 1fr; }
+  .fb-mapping-row { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <span class="status-dot online" id="statusDot"></span>
+    <h1 style="display:inline">Trae Local API Dashboard</h1>
+  </div>
+  <div class="links">
+    <span id="clock" style="color:var(--text-muted);font-size:13px"></span>
+    <button class="theme-btn" onclick="toggleTheme()" id="themeToggle" title="Toggle theme">&#9728;&#65039;</button>
+    <button class="theme-btn" onclick="openFallbackSettings()" title="Model Fallback Settings">&#9881;&#65039;</button>
+    <a href="/?key=" id="apiInfoLink">API Info</a>
+    <a href="https://github.com/ZedeX/trae-local-api" target="_blank">GitHub</a>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- API Key Required -->
+<div id="loginPrompt" style="background:var(--yellow-bg);border:1px solid var(--yellow);border-radius:8px;padding:16px;margin-bottom:20px;text-align:center">
+  <p style="color:var(--yellow);margin:0">API Key required. Add <span style="color:var(--accent)">?key=YOUR_API_KEY</span> to the URL to authenticate.</p>
+</div>
+
+<!-- Stats Row -->
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="label">Total Requests</div>
+    <div class="value" id="statRequests">-</div>
+    <div class="sub" id="statActive">Active: -</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Total Tokens</div>
+    <div class="value" id="statTokens">-</div>
+    <div class="sub" id="statTokensDetail">In: - / Out: -</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Avg Duration</div>
+    <div class="value" id="statDuration">-</div>
+    <div class="sub" id="statTotalDuration">Total: -</div>
+  </div>
+  <div class="stat-card">
+    <div class="label">Server Uptime</div>
+    <div class="value" id="statUptime">-</div>
+    <div class="sub" id="statVersion">v-</div>
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="item"><span class="key">Auto-Continue:</span><span class="val green" id="statusAuto">-</span></div>
+  <div class="item"><span class="key">Max Continues:</span><span class="val" id="statusMaxContinue">-</span></div>
+  <div class="item"><span class="key">Port:</span><span class="val" id="statusPort">-</span></div>
+  <div class="item"><span class="key">Workspace Dir:</span><span class="val blue" id="statusWorkspace">-</span></div>
+  <div class="item"><span class="key">Sync Dir:</span><span class="val blue" id="statusSync">-</span></div>
+</div>
+
+<!-- Filter Bar -->
+<div class="filter-bar">
+  <label style="color:var(--text-muted);font-size:13px">Workspace:</label>
+  <select id="wsFilter" onchange="refreshAll()">
+    <option value="">All Workspaces</option>
+  </select>
+  <span class="btn" id="btnAutoRefresh" onclick="toggleAutoRefresh()">Auto Refresh: ON</span>
+  <span class="btn" onclick="refreshAll()">Refresh Now</span>
+  <span class="refresh-notice">Last refresh: <span id="lastRefresh">-</span></span>
+</div>
+
+<!-- Active Requests -->
+<div class="panel" style="margin-bottom:20px" id="activePanel">
+  <div class="panel-header">
+    <h2>&#9673; Active Requests</h2>
+    <span style="font-size:12px;color:var(--text-muted)" id="activeCount">0 streaming</span>
+  </div>
+  <div class="panel-body">
+    <div class="active-list" id="activeList">
+      <div class="empty">No active streaming requests</div>
+    </div>
+  </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row">
+  <div class="panel">
+    <div class="panel-header"><h2>&#9776; Token Usage Over Time</h2></div>
+    <div class="panel-body">
+      <div class="chart-wrap"><canvas id="chartTimeline"></canvas></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-header"><h2>&#9673; Tokens by Model</h2></div>
+    <div class="panel-body">
+      <div class="chart-wrap"><canvas id="chartModel"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- Request Log Table -->
+<div class="panel">
+  <div class="panel-header">
+    <h2>&#9776; Recent Requests</h2>
+    <span style="font-size:12px;color:var(--text-muted)" id="requestCount">-</span>
+  </div>
+  <div class="panel-body" style="padding:0;overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>ID</th>
+          <th>Workspace</th>
+          <th>Model</th>
+          <th>Tokens</th>
+          <th>Duration</th>
+          <th>Status</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody id="requestTable">
+        <tr><td colspan="8" class="empty">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</div>
+
+<!-- Log Detail Modal -->
+<div class="modal-overlay" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <div>
+        <h2>Request Details <span class="modal-id" id="modalIdBadge"></span></h2>
+      </div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" onclick="switchModalTab('overview')">Overview</button>
+      <button class="modal-tab" onclick="switchModalTab('request')">Request</button>
+      <button class="modal-tab" onclick="switchModalTab('response')">Response</button>
+      <button class="modal-tab" onclick="switchModalTab('raw')">Raw JSON</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-tab-content active" id="tab-overview"></div>
+      <div class="modal-tab-content" id="tab-request"></div>
+      <div class="modal-tab-content" id="tab-response"></div>
+      <div class="modal-tab-content" id="tab-raw"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Fallback Settings Modal -->
+<div class="modal-overlay" id="fallbackModal" onclick="if(event.target===this)closeFallbackSettings()">
+  <div class="modal-content" style="max-width:960px">
+    <div class="modal-header">
+      <h2>&#9881; Model Fallback Settings</h2>
+      <button class="modal-close" onclick="closeFallbackSettings()">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto;padding:20px">
+      <div style="display:flex;gap:24px;align-items:center;margin-bottom:20px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer">
+          <span style="color:var(--text-muted)">Auto Fallback</span>
+          <div class="toggle-switch" id="fbAutoToggle" onclick="toggleFallbackAuto()">
+            <div class="toggle-knob"></div>
+          </div>
+          <span id="fbAutoLabel" style="font-weight:600;color:var(--green)">ON</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:14px">
+          <span style="color:var(--text-muted)">Queue Threshold</span>
+          <input type="number" id="fbThreshold" min="1" max="99999" value="500"
+            style="width:80px;background:var(--input-bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:14px;text-align:center">
+        </label>
+        <span style="font-size:12px;color:var(--text-dim)">排队超过此数值时自动降级</span>
+      </div>
+
+      <div class="section-title" style="margin-top:0">Model Fallback Chains</div>
+      <p style="font-size:12px;color:var(--text-dim);margin-bottom:12px">
+        每个 Claude 模型最多配置 3 个降级模型，按顺序依次尝试。排队超阈值时自动切换到下一个降级模型。
+      </p>
+      <div id="fbMappingsContainer"></div>
+
+      <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">
+        <button class="fb-btn fb-btn-secondary" onclick="loadFallbackConfigUI()">Reset</button>
+        <button class="fb-btn fb-btn-primary" onclick="saveFallbackConfigUI()">Save</button>
+      </div>
+      <div id="fbSaveStatus" style="text-align:right;font-size:12px;margin-top:8px;min-height:18px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+const AUTO_REFRESH_MS = 3000;
+let autoRefreshId = null;
+let autoRefreshOn = true;
+let tokenChart = null;
+let modelChart = null;
+let currentWorkspace = '';
+let workspaces = [];
+let apiKey = '';
+let currentModalData = null;
+
+// Read API key from URL query parameter
+const urlParams = new URLSearchParams(window.location.search);
+apiKey = urlParams.get('key') || '';
+
+// Show/hide login prompt
+if (apiKey) {
+  document.getElementById('loginPrompt').style.display = 'none';
+  document.getElementById('apiInfoLink').href = '/?key=' + encodeURIComponent(apiKey);
+} else {
+  document.getElementById('loginPrompt').style.display = 'block';
+  document.getElementById('statUptime').textContent = 'Login required';
+}
+
+// ===== Theme =====
+function applyTheme(theme) {
+  document.documentElement.className = theme === 'light' ? 'theme-light' : '';
+  document.getElementById('themeToggle').innerHTML = theme === 'light' ? '&#9790;&#65039;' : '&#9728;&#65039;';
+  localStorage.setItem('dashboard-theme', theme);
+  // Update charts
+  updateChartColors();
+}
+
+function toggleTheme() {
+  const current = document.documentElement.className === 'theme-light' ? 'light' : 'dark';
+  applyTheme(current === 'light' ? 'dark' : 'light');
+}
+
+// Load saved theme
+(function() {
+  const saved = localStorage.getItem('dashboard-theme') || 'dark';
+  applyTheme(saved);
+})();
+
+function getChartGridColor() {
+  return document.documentElement.className === 'theme-light' ? '#d0d7de' : '#21262d';
+}
+function getChartTickColor() {
+  return document.documentElement.className === 'theme-light' ? '#656d76' : '#8b949e';
+}
+
+function updateChartColors() {
+  [tokenChart, modelChart].forEach(chart => {
+    if (!chart) return;
+    const gridColor = getChartGridColor();
+    const tickColor = getChartTickColor();
+    chart.options.scales.x.grid.color = gridColor;
+    chart.options.scales.x.ticks.color = tickColor;
+    chart.options.scales.y.grid.color = gridColor;
+    chart.options.scales.y.ticks.color = tickColor;
+    if (chart.options.plugins?.legend?.labels) {
+      chart.options.plugins.legend.labels.color = tickColor;
+    }
+    chart.update();
+  });
+}
+
+async function apiCall(path) {
+  try {
+    const sep = path.includes('?') ? '&' : '?';
+    const url = `${API}${path}${sep}key=${encodeURIComponent(apiKey)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`${r.status}`);
+    return await r.json();
+  } catch (e) {
+    console.error(`API error: ${path}`, e);
+    return null;
+  }
+}
+
+function formatTokens(n) {
+  if (!n || n === 0) return '0';
+  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function formatDuration(ms) {
+  if (!ms) return '-';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms/1000).toFixed(1) + 's';
+  return (ms/60000).toFixed(1) + 'm';
+}
+
+function toggleAutoRefresh() {
+  autoRefreshOn = !autoRefreshOn;
+  const btn = document.getElementById('btnAutoRefresh');
+  btn.textContent = 'Auto Refresh: ' + (autoRefreshOn ? 'ON' : 'OFF');
+  btn.className = 'btn' + (autoRefreshOn ? ' active' : '');
+}
+
+async function refreshAll() {
+  const ws = document.getElementById('wsFilter').value;
+  currentWorkspace = ws;
+  await Promise.all([refreshStatus(), refreshRequests(), refreshStats(), refreshSessions()]);
+  document.getElementById('lastRefresh').textContent = new Date().toLocaleTimeString();
+}
+
+async function refreshStatus() {
+  const data = await apiCall('/v1/dashboard/status');
+  if (!data) return;
+
+  document.getElementById('statUptime').textContent = data.uptime;
+  document.getElementById('statVersion').textContent = 'v' + data.version;
+  document.getElementById('statActive').textContent = 'Active: ' + (data.activeRequests || 0);
+  document.getElementById('statusAuto').textContent = data.autoContinue ? 'ON' : 'OFF';
+  document.getElementById('statusMaxContinue').textContent = data.maxContinues || 5;
+  document.getElementById('statusPort').textContent = data.port || '-';
+  document.getElementById('statusWorkspace').textContent = data.workspaceDir || '-';
+  document.getElementById('statusSync').textContent = data.outputSyncDir || '-';
+  document.getElementById('statusDot').className = 'status-dot online';
+}
+
+async function refreshSessions() {
+  const data = await apiCall('/v1/dashboard/sessions');
+  if (!data) return;
+
+  const activeList = document.getElementById('activeList');
+  const activePanel = document.getElementById('activePanel');
+  if (data.activeRequests.length === 0) {
+    activeList.innerHTML = '<div class="empty">No active streaming requests</div>';
+    activePanel.style.display = 'block';
+  } else {
+    activePanel.style.display = 'block';
+    activeList.innerHTML = data.activeRequests.map(r => {
+      // 显示排队位置
+      let queueHtml = '';
+      if (r.queuePosition > 0) {
+        queueHtml = `<span class="queue-badge active">排队 #${r.queuePosition}</span>`;
+      } else if (r.queueTiming > 0) {
+        queueHtml = `<span class="queue-badge">已排队 ${formatDuration(r.queueTiming)}</span>`;
+      }
+      return `
+      <div class="active-item">
+        <span><span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px"></span>${r.id}</span>
+        <span style="color:var(--text-muted)">${r.workspace || 'default'}</span>
+        <span style="color:var(--text-muted)">${r.type}</span>
+        ${queueHtml}
+        <span>${formatDuration(r.elapsed_ms)}</span>
+        <span>${r.chunkCount} chunks</span>
+      </div>`;
+    }).join('');
+  }
+  document.getElementById('activeCount').textContent = data.activeRequests.length + ' streaming';
+
+  workspaces = data.workspaces || [];
+  const wsFilter = document.getElementById('wsFilter');
+  const currentValue = wsFilter.value;
+  wsFilter.innerHTML = '<option value="">All Workspaces</option>' +
+    workspaces.map(w => `<option value="${w.workspace}">${w.workspace} (${w.totalRequests})</option>`).join('');
+  wsFilter.value = currentValue;
+}
+
+async function refreshRequests() {
+  const ws = currentWorkspace;
+  const data = await apiCall(`/v1/dashboard/requests?workspace=${encodeURIComponent(ws)}&limit=50`);
+  if (!data) return;
+
+  const tbody = document.getElementById('requestTable');
+  if (data.requests.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">No requests recorded</td></tr>';
+  } else {
+    tbody.innerHTML = data.requests.map(r => {
+      const time = r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : '-';
+      const statusBadge = r.status >= 200 && r.status < 300 ? 'green' : 'red';
+      let typeBadge = '';
+      if (r.type === 'llmUtilsChat') typeBadge = 'blue badge';
+      else if (r.type === 'chatCompletion') typeBadge = 'green badge';
+      else typeBadge = 'yellow badge';
+      return `<tr onclick="viewLog('${r.timestamp?.substring(0,10) || ''}', '${r.workspace || 'default'}', '${r.id}', '${r.type}')" style="cursor:pointer" title="Click for details">
+        <td>${time}</td>
+        <td style="font-size:11px;color:var(--accent)">${r.id}</td>
+        <td>${r.workspace || 'default'}</td>
+        <td style="font-size:12px">${r.model || '-'}</td>
+        <td>${formatTokens(r.tokens)}</td>
+        <td>${formatDuration(r.duration_ms)}</td>
+        <td><span class="badge ${statusBadge}">${r.status || '-'}</span></td>
+        <td><span class="${typeBadge}" style="font-size:11px">${r.type}</span></td>
+      </tr>`;
+    }).join('');
+  }
+  document.getElementById('requestCount').textContent = data.requests.length + ' requests';
+
+  document.getElementById('statRequests').textContent = data.requests.length;
+  if (data.requests.length > 0) {
+    let totalTokens = 0, totalPrompt = 0, totalCompletion = 0, totalDuration = 0;
+    for (const r of data.requests) {
+      totalTokens += r.tokens || 0;
+      totalPrompt += r.promptTokens || 0;
+      totalCompletion += r.completionTokens || 0;
+      totalDuration += r.duration_ms || 0;
+    }
+    document.getElementById('statTokens').textContent = formatTokens(totalTokens);
+    document.getElementById('statTokensDetail').textContent = `In: ${formatTokens(totalPrompt)} / Out: ${formatTokens(totalCompletion)}`;
+    document.getElementById('statDuration').textContent = formatDuration(Math.round(totalDuration / data.requests.length));
+    document.getElementById('statTotalDuration').textContent = 'Total: ' + formatDuration(totalDuration);
+  }
+}
+
+async function refreshStats() {
+  const ws = currentWorkspace;
+  const data = await apiCall(`/v1/dashboard/stats?workspace=${encodeURIComponent(ws)}`);
+  if (!data) return;
+
+  const gridColor = getChartGridColor();
+  const tickColor = getChartTickColor();
+
+  const hours = data.timelineStats || [];
+  const newLabels = hours.map(h => h.hour);
+  const newTokens = hours.map(h => h.tokens);
+
+  if (tokenChart) {
+    const labelsChanged = JSON.stringify(tokenChart.data.labels) !== JSON.stringify(newLabels);
+    const dataChanged = JSON.stringify(tokenChart.data.datasets[0].data) !== JSON.stringify(newTokens);
+    if (labelsChanged || dataChanged) {
+      tokenChart.data.labels = newLabels;
+      tokenChart.data.datasets[0].data = newTokens;
+      tokenChart.options.scales.x.ticks.color = tickColor;
+      tokenChart.options.scales.x.grid.color = gridColor;
+      tokenChart.options.scales.y.ticks.color = tickColor;
+      tokenChart.options.scales.y.grid.color = gridColor;
+      tokenChart.update('none');
+    }
+  } else {
+    const ctx1 = document.getElementById('chartTimeline').getContext('2d');
+    tokenChart = new Chart(ctx1, {
+      type: 'line',
+      data: {
+        labels: newLabels,
+        datasets: [{
+          label: 'Tokens',
+          data: newTokens,
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointHoverRadius: 6
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+          y: { ticks: { color: tickColor, callback: v => formatTokens(v) }, grid: { color: gridColor } }
+        }
+      }
+    });
+  }
+
+  const models = Object.entries(data.modelStats || {});
+  const newModelLabels = models.map(([m]) => m);
+  const newModelData = models.map(([,d]) => d.tokens);
+  const colors = ['#58a6ff','#3fb950','#d29922','#f85149','#a371f7','#79c0ff','#56d364','#e3b341'];
+
+  if (modelChart) {
+    const labelsChanged = JSON.stringify(modelChart.data.labels) !== JSON.stringify(newModelLabels);
+    const dataChanged = JSON.stringify(modelChart.data.datasets[0].data) !== JSON.stringify(newModelData);
+    if (labelsChanged || dataChanged) {
+      modelChart.data.labels = newModelLabels;
+      modelChart.data.datasets[0].data = newModelData;
+      modelChart.data.datasets[0].backgroundColor = models.map((_,i) => colors[i % colors.length]);
+      modelChart.data.datasets[0].borderColor = document.documentElement.className === 'theme-light' ? '#ffffff' : '#161b22';
+      if (modelChart.options.plugins?.legend?.labels) {
+        modelChart.options.plugins.legend.labels.color = tickColor;
+      }
+      modelChart.update('none');
+    }
+  } else {
+    const ctx2 = document.getElementById('chartModel').getContext('2d');
+    modelChart = new Chart(ctx2, {
+      type: 'doughnut',
+      data: {
+        labels: newModelLabels,
+        datasets: [{
+          data: newModelData,
+          backgroundColor: models.map((_,i) => colors[i % colors.length]),
+          borderColor: document.documentElement.className === 'theme-light' ? '#ffffff' : '#161b22',
+          borderWidth: 2
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: tickColor, font: { size: 11 }, padding: 16 } },
+          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${formatTokens(ctx.raw)} tokens` } }
+        }
+      }
+    });
+  }
+}
+
+// ===== Modal =====
+let activeModalTab = 'overview';
+
+function switchModalTab(tab) {
+  activeModalTab = tab;
+  document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.modal-tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelector(`.modal-tab[onclick="switchModalTab('${tab}')"]`).classList.add('active');
+  document.getElementById('tab-' + tab).classList.add('active');
+}
+
+async function viewLog(date, workspace, id, type) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modalTitle').textContent = `Request Details`;
+  document.getElementById('modalIdBadge').textContent = id;
+  
+  // Reset tabs
+  switchModalTab('overview');
+  document.querySelectorAll('.modal-tab-content').forEach(c => c.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px">Loading...</p>');
+  
+  modal.classList.add('show');
+  document.body.style.overflow = 'hidden';
+
+  const data = await apiCall(`/v1/dashboard/log/${date}/${workspace}/${id}-${type}`);
+  if (!data) {
+    document.getElementById('tab-overview').innerHTML = '<p style="color:var(--red);text-align:center;padding:40px">Failed to load log</p>';
+    return;
+  }
+  currentModalData = data;
+  populateModal(data);
+}
+
+function populateModal(data) {
+  const req = data.request || {};
+  const resp = data.response || {};
+  const body = req.body || {};
+  const tu = resp.tokenUsage || {};
+
+  // Extract token values (handle nested structures)
+  function getToken(tu, key) {
+    if (!tu || typeof tu !== 'object') return 0;
+    if (typeof tu[key] === 'number') return tu[key];
+    if (tu.data && typeof tu.data === 'object') {
+      if (typeof tu.data[key] === 'number') return tu.data[key];
+      if (tu.data.data && typeof tu.data.data === 'object' && typeof tu.data.data[key] === 'number') return tu.data.data[key];
+    }
+    return 0;
+  }
+  const promptTks = getToken(tu, 'prompt_tokens');
+  const completionTks = getToken(tu, 'completion_tokens');
+  const totalTks = getToken(tu, 'total_tokens');
+  const calcTotal = promptTks + completionTks;
+
+  // Overview tab
+  document.getElementById('tab-overview').innerHTML = `
+    <div class="modal-grid">
+      <div class="modal-field">
+        <div class="f-label">Request ID</div>
+        <div class="f-value mono">${data.id || '-'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Workspace</div>
+        <div class="f-value">${data.workspace || 'default'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Timestamp</div>
+        <div class="f-value">${data.timestamp ? new Date(data.timestamp).toLocaleString('zh-CN') : '-'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Type</div>
+        <div class="f-value">${data.type || '-'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Model</div>
+        <div class="f-value">${body.model || body.function || 'auto'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Status</div>
+        <div class="f-value" style="color:${resp.status >= 200 && resp.status < 300 ? 'var(--green)' : 'var(--red)'}">${resp.status || '-'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Duration</div>
+        <div class="f-value">${formatDuration(resp.duration_ms)}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Content Length</div>
+        <div class="f-value">${(resp.fullContent || '').length.toLocaleString()} chars</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">SSE Chunks</div>
+        <div class="f-value">${(resp.chunks || []).length.toLocaleString()}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Request URL</div>
+        <div class="f-value mono" style="font-size:11px">${(req.url || '-').substring(0, 80)}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Messages</div>
+        <div class="f-value">${(body.messages || []).length} messages</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Stream</div>
+        <div class="f-value">${body.stream !== false ? 'Yes' : 'No'}</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+      <span class="token-badge in">&#9660; Input: ${formatTokens(promptTks)}</span>
+      <span class="token-badge out">&#9650; Output: ${formatTokens(completionTks)}</span>
+      <span class="token-badge total">&#9311; Total: ${formatTokens(totalTks || calcTotal)}</span>
+    </div>
+  `;
+
+  // Request tab
+  const messagesPreview = (body.messages || []).map(m => ({
+    role: m.role,
+    content: typeof m.content === 'string' ? (m.content.length > 300 ? m.content.substring(0, 300) + '...' : m.content) : '[complex content]'
+  }));
+  document.getElementById('tab-request').innerHTML = `
+    <div class="modal-grid" style="margin-bottom:16px">
+      <div class="modal-field">
+        <div class="f-label">URL</div>
+        <div class="f-value mono" style="font-size:11px">${(req.url || '-')}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Method</div>
+        <div class="f-value">${req.method || 'POST'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Model</div>
+        <div class="f-value">${body.model || body.function || 'auto'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Messages</div>
+        <div class="f-value">${(body.messages || []).length}</div>
+      </div>
+    </div>
+    <div class="section-title">Messages</div>
+    <pre>${JSON.stringify(messagesPreview, null, 2).replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+    <div class="section-title">Request Headers</div>
+    <pre>${JSON.stringify(req.headers || {}, null, 2).replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
+  `;
+
+  // Response tab
+  document.getElementById('tab-response').innerHTML = `
+    <div class="modal-grid" style="margin-bottom:16px">
+      <div class="modal-field">
+        <div class="f-label">Status</div>
+        <div class="f-value" style="color:${resp.status >= 200 && resp.status < 300 ? 'var(--green)' : 'var(--red)'}">${resp.status || '-'}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Duration</div>
+        <div class="f-value">${formatDuration(resp.duration_ms)}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Content Length</div>
+        <div class="f-value">${(resp.fullContent || '').length.toLocaleString()}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">SSE Chunks</div>
+        <div class="f-value">${(resp.chunks || []).length.toLocaleString()}</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <span class="token-badge in">Input: ${formatTokens(promptTks)}</span>
+      <span class="token-badge out">Output: ${formatTokens(completionTks)}</span>
+      <span class="token-badge total">Total: ${formatTokens(totalTks || calcTotal)}</span>
+    </div>
+    ${resp.fullReasoning ? `<div class="section-title">Reasoning</div><pre>${resp.fullReasoning.replace(/</g,'&lt;').replace(/>/g,'&gt;').substring(0, 5000)}</pre>` : ''}
+    <div class="section-title">Full Content</div>
+    <pre>${(resp.fullContent || '(empty)').replace(/</g,'&lt;').replace(/>/g,'&gt;').substring(0, 10000)}</pre>
+  `;
+
+  // Raw JSON tab
+  const sanitized = JSON.stringify(data, (key, value) => {
+    // Truncate very long string values for readability
+    if (typeof value === 'string' && value.length > 2000) return value.substring(0, 2000) + '...[TRUNCATED]';
+    return value;
+  }, 2);
+  document.getElementById('tab-raw').innerHTML = `<pre style="max-height:55vh">${sanitized.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`;
+}
+
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+  document.body.style.overflow = '';
+  currentModalData = null;
+}
+
+// Clock
+function updateClock() {
+  document.getElementById('clock').textContent = new Date().toLocaleString('zh-CN');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// Auto refresh cycle
+async function autoRefreshCycle() {
+  if (autoRefreshOn) await refreshAll();
+  autoRefreshId = setTimeout(autoRefreshCycle, AUTO_REFRESH_MS);
+}
+
+// Init
+refreshAll();
+autoRefreshCycle();
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeModal();
+    closeFallbackSettings();
+  }
+});
+
+// ===== Fallback Settings =====
+let fbConfig = null;
+const FB_AVAILABLE_MODELS = [
+  'glm-5.1', 'glm-5', 'GLM-5V-Turbo',
+  'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'deepseek-r1',
+  'Doubao-Seed-Code', 'Doubao-Seed-2.0-Code', 'doubao-1.5-pro', 'Doubao_1_6',
+  'MiniMax-M2.7', 'MiniMax-M2.5',
+  'Kimi-K2.6', 'Kimi-K2.5',
+  'Qwen3.6-Plus', 'Qwen3.5-Plus',
+  'gpt-4o', 'gpt-4o-mini',
+  'gemini-2.0-flash', 'gemini-2.5-pro'
+];
+
+const FB_CLAUDE_MODELS = [
+  'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-opus-4-5-20251101',
+  'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929',
+  'claude-3.7-sonnet', 'claude-3.5-sonnet', 'claude-sonnet-4',
+  'claude-haiku-4-5', 'claude-haiku-4-5-20251001'
+];
+
+const FB_DEFAULT_MAPPINGS = {
+  'claude-opus-4-7': ['glm-5.1', 'DeepSeek-V4-Pro', 'Doubao-Seed-2.0-Code'],
+  'claude-opus-4-6': ['glm-5.1', 'DeepSeek-V4-Pro', 'Doubao-Seed-2.0-Code'],
+  'claude-opus-4-5': ['glm-5.1', 'DeepSeek-V4-Pro', 'Doubao-Seed-2.0-Code'],
+  'claude-opus-4-5-20251101': ['glm-5.1', 'DeepSeek-V4-Pro', 'Doubao-Seed-2.0-Code'],
+  'claude-sonnet-4-6': ['DeepSeek-V4-Pro', 'glm-5.1', 'Doubao-Seed-Code'],
+  'claude-sonnet-4-5': ['DeepSeek-V4-Pro', 'glm-5.1', 'Doubao-Seed-Code'],
+  'claude-sonnet-4-5-20250929': ['DeepSeek-V4-Pro', 'glm-5.1', 'Doubao-Seed-Code'],
+  'claude-3.7-sonnet': ['DeepSeek-V4-Pro', 'glm-5.1', 'Doubao-Seed-Code'],
+  'claude-3.5-sonnet': ['DeepSeek-V4-Pro', 'glm-5.1', 'Doubao-Seed-Code'],
+  'claude-sonnet-4': ['DeepSeek-V4-Pro', 'glm-5.1', 'Doubao-Seed-Code'],
+  'claude-haiku-4-5': ['DeepSeek-V4-Flash', 'Qwen3.6-Plus', 'MiniMax-M2.7'],
+  'claude-haiku-4-5-20251001': ['DeepSeek-V4-Flash', 'Qwen3.6-Plus', 'MiniMax-M2.7']
+};
+
+function openFallbackSettings() {
+  document.getElementById('fallbackModal').classList.add('show');
+  document.body.style.overflow = 'hidden';
+  loadFallbackConfigUI();
+}
+
+function closeFallbackSettings() {
+  document.getElementById('fallbackModal').classList.remove('show');
+  document.body.style.overflow = '';
+}
+
+function toggleFallbackAuto() {
+  const toggle = document.getElementById('fbAutoToggle');
+  const label = document.getElementById('fbAutoLabel');
+  const isOn = toggle.classList.contains('on');
+  if (isOn) {
+    toggle.classList.remove('on');
+    label.textContent = 'OFF';
+    label.style.color = 'var(--text-dim)';
+  } else {
+    toggle.classList.add('on');
+    label.textContent = 'ON';
+    label.style.color = 'var(--green)';
+  }
+}
+
+async function loadFallbackConfigUI() {
+  const data = await apiCall('/v1/dashboard/fallback-config');
+  if (!data) {
+    fbConfig = { autoFallback: true, queueThreshold: 500, mappings: { ...FB_DEFAULT_MAPPINGS } };
+  } else {
+    fbConfig = data;
+  }
+
+  const toggle = document.getElementById('fbAutoToggle');
+  const label = document.getElementById('fbAutoLabel');
+  if (fbConfig.autoFallback) {
+    toggle.classList.add('on');
+    label.textContent = 'ON';
+    label.style.color = 'var(--green)';
+  } else {
+    toggle.classList.remove('on');
+    label.textContent = 'OFF';
+    label.style.color = 'var(--text-dim)';
+  }
+  document.getElementById('fbThreshold').value = fbConfig.queueThreshold || 500;
+
+  renderFallbackMappings(fbConfig.mappings || {});
+  document.getElementById('fbSaveStatus').textContent = '';
+}
+
+function renderFallbackMappings(mappings) {
+  const container = document.getElementById('fbMappingsContainer');
+  let html = '';
+
+  for (const claudeModel of FB_CLAUDE_MODELS) {
+    const chain = mappings[claudeModel] || [];
+    const usedModels = new Set(chain);
+
+    let chainHtml = '';
+    chain.forEach((model, idx) => {
+      const numClass = ['n1', 'n2', 'n3'][idx] || 'n3';
+      chainHtml += `
+        <span class="fb-fallback-item">
+          <span class="fb-fallback-num ${numClass}">${idx + 1}</span>
+          ${model}
+          <span class="fb-remove" onclick="fbRemoveFallback('${claudeModel}', ${idx})">&times;</span>
+        </span>`;
+    });
+
+    const availableToAdd = FB_AVAILABLE_MODELS.filter(m => !usedModels.has(m));
+    let addSelectHtml = '';
+    if (chain.length < 3 && availableToAdd.length > 0) {
+      addSelectHtml = `
+        <select class="fb-add-select" onchange="fbAddFallback('${claudeModel}', this.value); this.value=''">
+          <option value="">+ 添加</option>
+          ${availableToAdd.map(m => `<option value="${m}">${m}</option>`).join('')}
+        </select>`;
+    }
+
+    html += `
+      <div class="fb-mapping-row">
+        <div>
+          <div class="fb-model-name">${claudeModel}</div>
+        </div>
+        <div class="fb-fallback-list">
+          ${chainHtml}
+          ${addSelectHtml}
+          ${chain.length === 0 ? '<span style="font-size:12px;color:var(--text-dim)">无降级模型</span>' : ''}
+        </div>
+        <div>
+          ${chain.length > 0 ? `<button class="fb-btn fb-btn-secondary" style="padding:3px 10px;font-size:11px" onclick="fbClearFallback('${claudeModel}')">Clear</button>` : ''}
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function fbRemoveFallback(claudeModel, idx) {
+  if (!fbConfig) return;
+  if (!fbConfig.mappings[claudeModel]) return;
+  fbConfig.mappings[claudeModel].splice(idx, 1);
+  renderFallbackMappings(fbConfig.mappings);
+}
+
+function fbAddFallback(claudeModel, modelName) {
+  if (!modelName) return;
+  if (!fbConfig) fbConfig = { autoFallback: true, queueThreshold: 500, mappings: {} };
+  if (!fbConfig.mappings[claudeModel]) fbConfig.mappings[claudeModel] = [];
+  if (fbConfig.mappings[claudeModel].length >= 3) return;
+  if (fbConfig.mappings[claudeModel].includes(modelName)) return;
+  fbConfig.mappings[claudeModel].push(modelName);
+  renderFallbackMappings(fbConfig.mappings);
+}
+
+function fbClearFallback(claudeModel) {
+  if (!fbConfig) return;
+  fbConfig.mappings[claudeModel] = [];
+  renderFallbackMappings(fbConfig.mappings);
+}
+
+async function saveFallbackConfigUI() {
+  const autoFallback = document.getElementById('fbAutoToggle').classList.contains('on');
+  const queueThreshold = parseInt(document.getElementById('fbThreshold').value) || 500;
+  const mappings = fbConfig ? fbConfig.mappings : {};
+
+  const config = { autoFallback, queueThreshold, mappings };
+
+  const statusEl = document.getElementById('fbSaveStatus');
+  statusEl.textContent = 'Saving...';
+  statusEl.style.color = 'var(--yellow)';
+
+  try {
+    const sep = '/v1/dashboard/fallback-config'.includes('?') ? '&' : '?';
+    const url = `${API}/v1/dashboard/fallback-config${sep}key=${encodeURIComponent(apiKey)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const result = await r.json();
+    if (r.ok && result.ok) {
+      statusEl.textContent = 'Saved successfully!';
+      statusEl.style.color = 'var(--green)';
+      fbConfig = result.config || config;
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } else {
+      statusEl.textContent = 'Error: ' + (result.error || 'Unknown error');
+      statusEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.style.color = 'var(--red)';
+  }
+}
+</script>
+
+</body>
+</html>

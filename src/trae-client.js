@@ -6,6 +6,54 @@ const {
   detectEdition, getDeviceInfo
 } = require('./auth');
 const trafficLogger = require('./traffic-logger');
+const fs = require('fs');
+const path = require('path');
+
+const FALLBACK_CONFIG_PATH = path.join(__dirname, '..', 'model-fallback.json');
+
+let fallbackConfig = { autoFallback: true, queueThreshold: 500, mappings: {} };
+
+function loadFallbackConfig() {
+  try {
+    if (fs.existsSync(FALLBACK_CONFIG_PATH)) {
+      const raw = fs.readFileSync(FALLBACK_CONFIG_PATH, 'utf-8');
+      fallbackConfig = JSON.parse(raw);
+    }
+  } catch (e) {
+    console.error('[fallback] Failed to load config:', e.message);
+  }
+}
+
+function saveFallbackConfig(config) {
+  try {
+    fs.writeFileSync(FALLBACK_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    fallbackConfig = config;
+  } catch (e) {
+    console.error('[fallback] Failed to save config:', e.message);
+  }
+}
+
+function getFallbackConfig() {
+  return { ...fallbackConfig };
+}
+
+loadFallbackConfig();
+
+let fallbackConfigWatcher = null;
+function watchFallbackConfig() {
+  if (fallbackConfigWatcher) return;
+  try {
+    fallbackConfigWatcher = fs.watch(FALLBACK_CONFIG_PATH, (eventType) => {
+      if (eventType === 'change') {
+        setTimeout(() => {
+          loadFallbackConfig();
+          console.log('[fallback] Config reloaded (hot)');
+        }, 100);
+      }
+    });
+  } catch (e) {}
+}
+watchFallbackConfig();
 
 const HTTP_PROXY = process.env.HTTP_PROXY || process.env.http_proxy || '';
 const HTTPS_PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || '';
@@ -86,25 +134,56 @@ const FUNCTION_MAP = {
 };
 
 const MODEL_TO_FUNCTION = {
-  'claude-3.5-sonnet': { function: 'chat_v3', config_name: 'claude-3.5-sonnet' },
-  'claude-3.7-sonnet': { function: 'chat_v3', config_name: 'claude-3.7-sonnet' },
-  'claude-sonnet-4': { function: 'chat_v3', config_name: 'claude-sonnet-4' },
+  // Claude Opus 系列 → GLM-5.1（最强推理）
+  'claude-opus-4-7': { function: 'chat_v3', config_name: 'glm-5.1' },
+  'claude-opus-4-6': { function: 'chat_v3', config_name: 'glm-5.1' },
+  'claude-opus-4-5': { function: 'chat_v3', config_name: 'glm-5.1' },
+  'claude-opus-4-5-20251101': { function: 'chat_v3', config_name: 'glm-5.1' },
+  // Claude Sonnet 系列 → DeepSeek-V4-Pro（toolcall 更稳定）
+  'claude-sonnet-4-6': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'claude-sonnet-4-5': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'claude-sonnet-4-5-20250929': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'claude-3.5-sonnet': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'claude-3.7-sonnet': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'claude-sonnet-4': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  // Claude Haiku 系列 → DeepSeek-V4-Flash（最快）
+  'claude-haiku-4-5': { function: 'chat_v3', config_name: 'DeepSeek-V4-Flash' },
+  'claude-haiku-4-5-20251001': { function: 'chat_v3', config_name: 'DeepSeek-V4-Flash' },
+  // DeepSeek 系列
+  'deepseek-v3': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'deepseek-v4-pro': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
+  'deepseek-v4-flash': { function: 'chat_v3', config_name: 'DeepSeek-V4-Flash' },
+  'deepseek-r1': { function: 'chat_v3', config_name: 'deepseek-r1' },
+  // GLM 系列
+  'glm-5': { function: 'chat_v3', config_name: 'glm-5' },
+  'glm-5.1': { function: 'chat_v3', config_name: 'glm-5.1' },
+  'glm-5v-turbo': { function: 'chat_v3', config_name: 'GLM-5V-Turbo' },
+  // Doubao 系列（代码专用）
+  'doubao-seed-code': { function: 'chat_v3', config_name: 'Doubao-Seed-Code' },
+  'doubao-seed-2.0-code': { function: 'chat_v3', config_name: 'Doubao-Seed-2.0-Code' },
+  'doubao-1.5-pro': { function: 'chat_v3', config_name: 'doubao-1.5-pro' },
+  'doubao-1-6': { function: 'chat_v3', config_name: 'Doubao_1_6' },
+  // MiniMax 系列
+  'minimax-m2.7': { function: 'chat_v3', config_name: 'MiniMax-M2.7' },
+  'minimax-m2.5': { function: 'chat_v3', config_name: 'MiniMax-M2.5' },
+  // Kimi 系列
+  'kimi-k2.6': { function: 'chat_v3', config_name: 'Kimi-K2.6' },
+  'kimi-k2.5': { function: 'chat_v3', config_name: 'Kimi-K2.5' },
+  // Qwen 系列
+  'qwen3.6-plus': { function: 'chat_v3', config_name: 'Qwen3.6-Plus' },
+  'qwen3.5-plus': { function: 'chat_v3', config_name: 'Qwen3.5-Plus' },
+  // 其他模型
   'gpt-4o': { function: 'chat_v3', config_name: 'gpt-4o' },
   'gpt-4o-mini': { function: 'chat_v3', config_name: 'gpt-4o-mini' },
   'gemini-2.0-flash': { function: 'chat_v3', config_name: 'gemini-2.0-flash' },
   'gemini-2.5-pro': { function: 'chat_v3', config_name: 'gemini-2.5-pro' },
-  'deepseek-v3': { function: 'chat_v3', config_name: 'deepseek-v3' },
-  'deepseek-r1': { function: 'chat_v3', config_name: 'deepseek-r1' },
-  'doubao-1.5-pro': { function: 'chat_v3', config_name: 'doubao-1.5-pro' },
-  'doubao-1-6': { function: 'chat_v3', config_name: 'Doubao_1_6' },
-  'glm-5': { function: 'chat_v3', config_name: 'glm-5' },
-  'glm-5.1': { function: 'chat_v3', config_name: 'glm-5.1' },
 };
 
 const MODEL_MAP = {
   'claude-3.5-sonnet': 'claude-3.5-sonnet',
   'claude-3.7-sonnet': 'claude37',
   'claude-sonnet-4': 'claude-sonnet-4',
+  'claude-sonnet-4-6': 'glm-5.1',
   'gpt-4o': 'gpt-4o',
   'gpt-4o-mini': 'gpt-4o-mini',
   'gemini-2.0-flash': 'gemini-2.0-flash',
@@ -132,10 +211,13 @@ function resolveModelId(modelName) {
   return lower;
 }
 
-function resolveModelOptions(modelName) {
+function resolveModelOptions(modelName, configNameOverride) {
   const lower = (modelName || '').toLowerCase();
   if (lower === 'auto' || !lower) {
     return { function: 'inline_chat', config_name: null };
+  }
+  if (configNameOverride) {
+    return { function: 'chat_v3', config_name: configNameOverride };
   }
   if (MODEL_TO_FUNCTION[lower]) {
     return MODEL_TO_FUNCTION[lower];
@@ -144,6 +226,12 @@ function resolveModelOptions(modelName) {
     if (lower.includes(key)) return val;
   }
   return { function: 'chat_v3', config_name: modelName };
+}
+
+function getFallbackChain(modelName) {
+  const lower = (modelName || '').toLowerCase();
+  const mappings = fallbackConfig.mappings || {};
+  return mappings[lower] || [];
 }
 
 async function ensureAuth() {
@@ -177,8 +265,9 @@ async function llmUtilsChat(messages, model, stream, options) {
       stream: stream !== false,
     };
 
-    if (options?.config_name && funcName !== 'inline_chat') {
-      body.config_name = options.config_name;
+    const configName = options?.config_name || modelOpts?.config_name;
+    if (configName && funcName !== 'inline_chat') {
+      body.config_name = configName;
     }
 
     const modelName = options?.model_name || (model && model !== 'auto' ? model : null);
@@ -197,9 +286,9 @@ async function llmUtilsChat(messages, model, stream, options) {
       method: 'POST',
       headers: headers,
       body: body
-    });
+    }, options?.workspace);
 
-    console.log(`[llmUtilsChat] POST ${endpoint}, function=${funcName}, config_name=${options?.config_name || 'default'}, model=${body.model || 'default'}, stream=${stream}, logId=${logId}`);
+    console.log(`[llmUtilsChat] POST ${endpoint}, function=${funcName}, config_name=${body.config_name || 'default'}, model=${body.model || 'default'}, stream=${stream}, logId=${logId}`);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 300000); // 5 min timeout
@@ -356,7 +445,7 @@ async function createAgentTask(messages, model, stream, options) {
     method: 'POST',
     headers: headers,
     body: body
-  });
+  }, options?.workspace);
 
   console.log(`[createAgentTask] POST ${endpoint}, model=${modelId}, stream=${stream}, session=${sessionId}, logId=${logId}`);
 
@@ -428,7 +517,7 @@ async function chatCompletion(messages, model, stream, options) {
     method: 'POST',
     headers: headers,
     body: body
-  });
+  }, options?.workspace);
 
   console.log(`[chatCompletion] POST ${url}, model=${modelId}, stream=${stream}, logId=${logId}`);
 
@@ -475,5 +564,9 @@ module.exports = {
   createAgentTask,
   generateId,
   retryWithBackoff,
-  sleep
+  sleep,
+  getFallbackConfig,
+  saveFallbackConfig,
+  getFallbackChain,
+  loadFallbackConfig
 };

@@ -25,6 +25,8 @@ tmp-userdata/
 
 # Test data & scripts (探索/测试脚本不同步)
 scripts/
+test-*.json
+tests/
 
 # IDE
 .vscode/

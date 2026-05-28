@@ -99,16 +99,29 @@ function normalizeLlmUtilsChunk(chunk, eventName) {
 
   if (eventName === 'output') {
     const result = { type: 'text' };
+
+    // Old format: {"response": "..."}
     if (chunk.response) {
       const resp = chunk.response;
       if (resp.startsWith('Building prompt:') || resp.startsWith('Completed building prompt')) {
         return { type: 'progress', data: resp };
       }
-      result.content = resp;
+      result.content = (result.content || '') + resp;
     }
+    // New format (2026-05): {"type":"text","content":"..."}
+    if (chunk.content) {
+      result.content = (result.content || '') + chunk.content;
+    }
+
+    // Old format: {"reasoning_content": "..."}
     if (chunk.reasoning_content) {
-      result.reasoning = chunk.reasoning_content;
+      result.reasoning = (result.reasoning || '') + chunk.reasoning_content;
     }
+    // New format (2026-05): {"reasoning": "..."}
+    if (chunk.reasoning) {
+      result.reasoning = (result.reasoning || '') + chunk.reasoning;
+    }
+
     if (chunk.tool_calls) {
       result.tool_calls = chunk.tool_calls;
     }
@@ -147,6 +160,27 @@ function normalizeLlmUtilsChunk(chunk, eventName) {
 
   if (eventName === 'progress_notice') {
     return { type: 'progress', data: chunk };
+  }
+
+  // Queue events - 排队相关事件
+  if (eventName === 'queue_begin') {
+    return { type: 'queue_begin', data: chunk };
+  }
+
+  if (eventName === 'request_wait_in_queue') {
+    const position = chunk?.data?.position || chunk?.position || 0;
+    if (position > 0) {
+      // 只在位置是 10 的倍数或 < 20 时输出，减少刷屏
+      if (position <= 20 || position % 50 === 0) {
+        console.log(`[queue] Position: ${position} - waiting...`);
+      }
+    }
+    return { type: 'queue_wait', position: position, data: chunk };
+  }
+
+  if (eventName === 'queue_end') {
+    console.log(`[queue] Queue ended - request processing...`);
+    return { type: 'queue_end', data: chunk };
   }
 
   return { type: eventName || 'unknown', data: chunk };

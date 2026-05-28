@@ -1,0 +1,66 @@
+{
+  "autoFallback": true,
+  "queueThreshold": 300,
+  "mappings": {
+    "claude-sonnet-4-6": [
+      "DeepSeek-V4-Pro",
+      "glm-5.1",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-opus-4-7": [
+      "glm-5.1",
+      "DeepSeek-V4-Pro",
+      "Qwen3.6-Plus"
+    ],
+    "claude-opus-4-6": [
+      "glm-5.1",
+      "GLM-5V-Turbo",
+      "Qwen3.6-Plus"
+    ],
+    "claude-opus-4-5": [
+      "glm-5",
+      "Qwen3.6-Plus",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-opus-4-5-20251101": [
+      "glm-5",
+      "Qwen3.6-Plus",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-sonnet-4-5": [
+      "glm-5",
+      "DeepSeek-V4-Flash",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-sonnet-4-5-20250929": [
+      "DeepSeek-V4-Flash",
+      "Qwen3.5-Plus",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-3.7-sonnet": [
+      "DeepSeek-V4-Flash",
+      "Qwen3.5-Plus",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-3.5-sonnet": [
+      "DeepSeek-V4-Flash",
+      "Qwen3.5-Plus",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-sonnet-4": [
+      "DeepSeek-V4-Flash",
+      "Qwen3.5-Plus",
+      "Doubao-Seed-2.0-Code"
+    ],
+    "claude-haiku-4-5": [
+      "DeepSeek-V4-Pro",
+      "DeepSeek-V4-Flash",
+      "Qwen3.5-Plus"
+    ],
+    "claude-haiku-4-5-20251001": [
+      "DeepSeek-V4-Pro",
+      "DeepSeek-V4-Flash",
+      "Qwen3.5-Plus"
+    ]
+  }
+}

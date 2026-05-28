@@ -5,7 +5,7 @@ const path = require('path');
 require('dotenv').config();
 
 const { getAuthInfo, getDeviceIds, isTokenExpired, getApiHost, refreshTokenIfNeeded, detectEdition } = require('./auth');
-const { llmUtilsChat, chatCompletion, createAgentTask, getModelDetailParam, getChatModes, resolveModelId, MODEL_MAP, REVERSE_MODEL_MAP, FUNCTION_MAP } = require('./trae-client');
+const { llmUtilsChat, chatCompletion, createAgentTask, getModelDetailParam, getChatModes, resolveModelId, MODEL_MAP, REVERSE_MODEL_MAP, FUNCTION_MAP, getFallbackConfig, saveFallbackConfig, getFallbackChain } = require('./trae-client');
 const { createOpenAIChatCompletion, createOpenAIStreamChunk, createOpenAIModels, parseLlmUtilsChatStream, llmUtilsChunkToOpenAI, parseAgentTaskStream, parseTraeStreamChunk, traeChunkToOpenAI } = require('./openai-format');
 const {
   createAnthropicMessage,
@@ -103,10 +103,12 @@ function authenticate(req, res, next) {
     token = req.headers['authorization'].replace('Bearer ', '');
   } else if (req.headers['x-api-key']) {
     token = req.headers['x-api-key'];
+  } else if (req.query?.key) {
+    token = req.query.key;
   }
   
   if (!token) {
-    return res.status(401).json({ error: { message: 'Missing API key (Authorization header or x-api-key)', type: 'auth_error' } });
+    return res.status(401).json({ error: { message: 'Missing API key (Authorization header, x-api-key, or ?key= query param)', type: 'auth_error' } });
   }
   
   if (token !== API_KEY) {
@@ -127,6 +129,13 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
   let fullContent = '';
   let fullReasoning = '';
   let tokenUsage = null;
+  let llmFinalized = false;
+
+  const finalizeLlmLog = () => {
+    if (llmFinalized) return;
+    llmFinalized = true;
+    if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
+  };
 
   responseBody.on('data', (chunk) => {
     buffer += chunk.toString();
@@ -215,14 +224,17 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
       res.write('data: [DONE]\n\n');
       res.end();
     }
-    // 完成日志记录（如果 done 事件未触发）
-    if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
+    finalizeLlmLog();
+  });
+
+  responseBody.on('close', () => {
+    finalizeLlmLog();
   });
 
   responseBody.on('error', (err) => {
     console.error('[stream] error:', err);
     if (logId) trafficLogger.logError(logId, err);
-    if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
+    finalizeLlmLog();
     if (!res.writableEnded) {
       const errChunk = createOpenAIStreamChunk(completionId, modelName, { content: `\n\n[Error: ${err.message}]` }, 'stop');
       res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
@@ -320,6 +332,7 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
     if (funcName) options.function = funcName;
     if (config_name) options.config_name = config_name;
     if (workspace_dir) options.workspace_dir = workspace_dir;
+    options.workspace = extractWorkspace(req);
 
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -642,6 +655,7 @@ app.post('/v1/chat/file', authenticate, async (req, res) => {
     const modelName = model || 'auto';
     const options = {};
     if (funcName) options.function = funcName;
+    options.workspace = extractWorkspace(req);
 
     const completionId = `chatcmpl-${uuidv4()}`;
 
@@ -813,11 +827,14 @@ app.get('/', (req, res) => {
       models: 'GET /v1/models',
       models_detail: 'GET /v1/models/detail?function=chat_v3',
       chat_modes: 'GET /v1/chat/modes',
+      anthropic: 'POST /v1/messages',
       files: 'GET /v1/files',
       files_read: 'GET /v1/files/read?path=xxx',
       status: 'GET /v1/status',
       encrypt: 'POST /v1/encrypt',
       decrypt: 'POST /v1/decrypt',
+      dashboard: 'GET /v1/dashboard (HTML page)',
+      dashboard_api: 'GET /v1/dashboard/status|sessions|requests|stats',
     },
     primary_endpoint: '/api/agent/v3/llm_utils_chat',
     functions: Object.keys(FUNCTION_MAP),
@@ -842,6 +859,166 @@ app.post('/v1/sync/clear', authenticate, (req, res) => {
   pendingSyncFiles.length = 0;
   res.json({ cleared });
 });
+
+// ==================== Dashboard API ====================
+
+/**
+ * 从请求中提取 workspace 标识
+ * 优先级: X-Workspace header > workspace query param > body.workspace > 'default'
+ */
+function extractWorkspace(req) {
+  // 1. X-Workspace header
+  const headerWs = req.headers['x-workspace'];
+  if (headerWs) return sanitizeWorkspace(headerWs);
+  // 2. Query parameter
+  const queryWs = req.query?.workspace;
+  if (queryWs) return sanitizeWorkspace(queryWs);
+  // 3. Body parameter
+  const bodyWs = req.body?.workspace;
+  if (bodyWs) return sanitizeWorkspace(bodyWs);
+  return 'default';
+}
+
+function sanitizeWorkspace(ws) {
+  return String(ws).replace(/[<>:"/\\|?*]/g, '_').replace(/[^a-zA-Z0-9_\-\.\u4e00-\u9fff]/g, '-').substring(0, 64) || 'default';
+}
+
+// 服务启动时间
+const serverStartTime = Date.now();
+
+app.get('/v1/dashboard/status', authenticate, (req, res) => {
+  const uptime = Date.now() - serverStartTime;
+  const uptimeStr = `${Math.floor(uptime / 3600000)}h ${Math.floor((uptime % 3600000) / 60000)}m ${Math.floor((uptime % 60000) / 1000)}s`;
+  res.json({
+    name: 'Trae Local API',
+    version: '2.0.0',
+    port: PORT,
+    uptime: uptimeStr,
+    uptime_ms: uptime,
+    startedAt: new Date(serverStartTime).toISOString(),
+    activeRequests: trafficLogger.getActiveCount(),
+    autoContinue: AUTO_CONTINUE,
+    maxContinues: MAX_CONTINUES,
+    workspaceDir: WORKSPACE_DIR,
+    outputSyncDir: OUTPUT_SYNC_DIR
+  });
+});
+
+app.get('/v1/dashboard/sessions', authenticate, (req, res) => {
+  const active = trafficLogger.getActiveRequests();
+  const dirs = trafficLogger.getLogDirectories();
+  const workspaces = new Map();
+  for (const d of dirs) {
+    const ws = workspaces.get(d.workspace) || { workspace: d.workspace, totalRequests: 0, dates: [] };
+    ws.totalRequests += d.fileCount;
+    ws.dates.push({ date: d.date, requests: d.fileCount });
+    workspaces.set(d.workspace, ws);
+  }
+  res.json({
+    activeRequests: active,
+    workspaces: Array.from(workspaces.values()),
+    activeCount: active.length
+  });
+});
+
+app.get('/v1/dashboard/requests', authenticate, (req, res) => {
+  const workspace = req.query.workspace || '';
+  const limit = parseInt(req.query.limit) || 50;
+  const offset = parseInt(req.query.offset) || 0;
+  const entries = trafficLogger.readRecentLogs(workspace, limit, offset);
+  res.json({ requests: entries, total: entries.length, limit, offset, workspace: workspace || 'all' });
+});
+
+app.get('/v1/dashboard/stats', authenticate, (req, res) => {
+  const workspace = req.query.workspace || '';
+  const entries = trafficLogger.readRecentLogs(workspace, 500, 0);
+  
+  // Aggregate stats
+  let totalTokens = 0;
+  let totalPromptTokens = 0;
+  let totalCompletionTokens = 0;
+  let totalDuration = 0;
+  let totalContentLength = 0;
+  const modelStats = {};
+  const timelineStats = {}; // hour -> { tokens, count }
+  
+  for (const e of entries) {
+    totalTokens += e.tokens || 0;
+    totalPromptTokens += e.promptTokens || 0;
+    totalCompletionTokens += e.completionTokens || 0;
+    totalDuration += e.duration_ms || 0;
+    totalContentLength += e.contentLength || 0;
+    
+    const model = e.model || 'unknown';
+    if (!modelStats[model]) modelStats[model] = { requests: 0, tokens: 0, duration: 0 };
+    modelStats[model].requests++;
+    modelStats[model].tokens += e.tokens || 0;
+    modelStats[model].duration += e.duration_ms || 0;
+    
+    if (e.timestamp) {
+      const hour = e.timestamp.substring(0, 13); // "2026-05-25T15"
+      if (!timelineStats[hour]) timelineStats[hour] = { tokens: 0, count: 0 };
+      timelineStats[hour].tokens += e.tokens || 0;
+      timelineStats[hour].count++;
+    }
+  }
+  
+  res.json({
+    workspace: workspace || 'all',
+    totalRequests: entries.length,
+    totalTokens,
+    totalPromptTokens,
+    totalCompletionTokens,
+    totalDurationMs: totalDuration,
+    avgDurationMs: entries.length ? Math.round(totalDuration / entries.length) : 0,
+    totalContentLength,
+    modelStats,
+    timelineStats: Object.entries(timelineStats).sort().map(([hour, data]) => ({ hour: hour.substring(11), ...data }))
+  });
+});
+
+app.get('/v1/dashboard/log/:date/:workspace/:logId', authenticate, (req, res) => {
+  const { date, workspace, logId } = req.params;
+  const entry = trafficLogger.readLogEntry(date, workspace, logId);
+  if (!entry) return res.status(404).json({ error: 'Log not found' });
+  res.json(entry);
+});
+
+// Fallback config API
+app.get('/v1/dashboard/fallback-config', authenticate, (req, res) => {
+  res.json(getFallbackConfig());
+});
+
+app.post('/v1/dashboard/fallback-config', authenticate, (req, res) => {
+  try {
+    const config = req.body;
+    if (typeof config.autoFallback !== 'boolean') {
+      return res.status(400).json({ error: 'autoFallback must be boolean' });
+    }
+    if (typeof config.queueThreshold !== 'number' || config.queueThreshold < 0) {
+      return res.status(400).json({ error: 'queueThreshold must be non-negative number' });
+    }
+    if (typeof config.mappings !== 'object') {
+      return res.status(400).json({ error: 'mappings must be object' });
+    }
+    saveFallbackConfig(config);
+    console.log('[fallback] Config updated via dashboard');
+    res.json({ ok: true, config: getFallbackConfig() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/v1/dashboard', (req, res) => {
+  const filePath = path.join(__dirname, '..', 'web', 'dashboard.html');
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send('Dashboard page not found');
+  }
+});
+
+// ==================== Anthropic Endpoint ====================
 
 app.post('/v1/messages', authenticate, async (req, res) => {
   const reqId = uuidv4().substring(0, 8);
@@ -927,6 +1104,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
     const options = {};
     if (max_tokens) options.max_tokens = max_tokens;
     if (temperature !== undefined) options.temperature = temperature;
+    options.workspace = extractWorkspace(req);
 
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -947,11 +1125,17 @@ app.post('/v1/messages', authenticate, async (req, res) => {
 
       let streamState = null;
       let continueCount = 0;
-      let currentMessages = [...openaiMessages]; // mutable copy for continue
+      let lastQueuePosition = 0;
+      let currentMessages = [...openaiMessages];
+      let fallbackAttempted = {};  // 记录已尝试的降级模型
+      let currentConfigName = null;  // 当前使用的 config_name
 
       // Helper: process a single llmUtilsChat stream
-      const processStream = async (messages) => {
-        const result = await llmUtilsChat(messages, modelName, true, options);
+      const processStream = async (messages, configNameOverride = null) => {
+        if (configNameOverride) {
+          currentConfigName = configNameOverride;
+        }
+        const result = await llmUtilsChat(messages, modelName, true, { ...options, config_name: configNameOverride || options?.config_name });
         const logId = result.logId;
 
         if (!result.body) {
@@ -995,6 +1179,100 @@ app.post('/v1/messages', authenticate, async (req, res) => {
                   continue;
                 }
 
+                // Inject queue position as text into Anthropic stream
+                // so Claude Code CLI can see the waiting status
+                if (parsed.type === 'queue_wait' && parsed.position > 0) {
+                  if (parsed.position !== lastQueuePosition) {
+                    lastQueuePosition = parsed.position;
+
+                    // 检查是否需要降级
+                    const fbConfig = getFallbackConfig();
+                    if (fbConfig.autoFallback && parsed.position > fbConfig.queueThreshold) {
+                      const fallbackChain = getFallbackChain(modelName);
+                      // 找到第一个未尝试的降级模型
+                      const nextModel = fallbackChain.find(m => !fallbackAttempted[m]);
+                      if (nextModel) {
+                        fallbackAttempted[nextModel] = true;
+                        console.log(`[fallback] Queue #${parsed.position} > threshold ${fbConfig.queueThreshold}, falling back to ${nextModel}`);
+                        
+                        // 中断当前请求
+                        result.body.destroy();
+                        
+                        // 立即 finalize 当前流的日志（close 事件可能延迟）
+                        finalizeStreamLog();
+                        
+                        // 注入降级通知到流中
+                        if (!streamState) {
+                          streamState = {
+                            messageStarted: false, messageStopped: false,
+                            contentBlockIndex: -1, currentContentType: null,
+                            textContent: '', toolCalls: [], outputTokenCount: 0,
+                            reasoningContent: '', stopReason: null,
+                            suppressStopEvents: false, pendingToolCalls: []
+                          };
+                        }
+                        if (!streamState.messageStarted) {
+                          sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
+                          streamState.messageStarted = true;
+                        }
+                        if (streamState.currentContentType !== 'text') {
+                          if (streamState.contentBlockIndex >= 0) {
+                            sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
+                          }
+                          streamState.contentBlockIndex++;
+                          sendEvent('content_block_start', createAnthropicContentBlockStart(streamState.contentBlockIndex, 'text', { text: '' }));
+                          streamState.currentContentType = 'text';
+                        }
+                        sendEvent('content_block_delta', createAnthropicContentBlockDelta(streamState.contentBlockIndex, { type: 'text_delta', text: `[⬇️ 排队 #${parsed.position} > ${fbConfig.queueThreshold}，降级到 ${nextModel}]\n` }));
+                        
+                        // 重置流状态，用降级模型重新发起请求
+                        streamState.currentContentType = null;
+                        streamState.contentBlockIndex++;
+                        lastQueuePosition = 0;
+                        
+                        // 用降级模型重试
+                        resolve({ fallback: true, nextModel });
+                        return;
+                      }
+                    }
+
+                    if (!streamState) {
+                      streamState = {
+                        messageStarted: false, messageStopped: false,
+                        contentBlockIndex: -1, currentContentType: null,
+                        textContent: '', toolCalls: [], outputTokenCount: 0,
+                        reasoningContent: '', stopReason: null,
+                        suppressStopEvents: false, pendingToolCalls: []
+                      };
+                    }
+                    if (!streamState.messageStarted) {
+                      sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
+                      streamState.messageStarted = true;
+                    }
+                    if (streamState.currentContentType !== 'text') {
+                      if (streamState.contentBlockIndex >= 0) {
+                        sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
+                      }
+                      streamState.contentBlockIndex++;
+                      sendEvent('content_block_start', createAnthropicContentBlockStart(streamState.contentBlockIndex, 'text', { text: '' }));
+                      streamState.currentContentType = 'text';
+                    }
+                    const queueText = `[⏳ 排队 #${parsed.position}]\n`;
+                    sendEvent('content_block_delta', createAnthropicContentBlockDelta(streamState.contentBlockIndex, { type: 'text_delta', text: queueText }));
+                  }
+                  continue;
+                }
+
+                if (parsed.type === 'queue_begin') {
+                  sendEvent('ping', { type: 'ping' });
+                  continue;
+                }
+
+                if (parsed.type === 'queue_end') {
+                  lastQueuePosition = 0;
+                  continue;
+                }
+
                 const { events, state } = llmUtilsChunkToAnthropic(parsed, messageId, modelName, streamState, toolMap);
                 streamState = state;
 
@@ -1018,17 +1296,28 @@ app.post('/v1/messages', authenticate, async (req, res) => {
             }
           });
 
-          result.body.on('end', () => {
+          let streamFinalized = false;
+          const finalizeStreamLog = () => {
+            if (streamFinalized) return;
+            streamFinalized = true;
             if (logId) trafficLogger.finalizeLog(logId, {
               fullContent: streamState?.textContent || '',
               fullReasoning: streamState?.reasoningContent || '',
-              tokenUsage: streamState?.outputTokenCount ? { completion_tokens: streamState.outputTokenCount } : null
             });
-            resolve();
+          };
+
+          result.body.on('end', () => {
+            finalizeStreamLog();
+            resolve({ fallback: false });
+          });
+
+          result.body.on('close', () => {
+            finalizeStreamLog();
           });
 
           result.body.on('error', (err) => {
             console.error(`[anthropic ${reqId}] stream error:`, err);
+            finalizeStreamLog();
             reject(err);
           });
 
@@ -1036,6 +1325,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
             const elapsed = Date.now() - startTime;
             console.log(`[anthropic ${reqId}] client disconnected after ${elapsed}ms`);
             if (result.body && result.body.destroy) result.body.destroy();
+            finalizeStreamLog();
             reject(new Error('Client disconnected'));
           });
         });
@@ -1051,7 +1341,13 @@ app.post('/v1/messages', authenticate, async (req, res) => {
             streamState.suppressStopEvents = true;
           }
 
-          await processStream(currentMessages);
+          const streamResult = await processStream(currentMessages, currentConfigName);
+
+          // 处理降级重试
+          if (streamResult && streamResult.fallback) {
+            console.log(`[anthropic ${reqId}] Retrying with fallback model: ${streamResult.nextModel}`);
+            continue;  // 重新进入循环，用降级模型重试
+          }
 
           const elapsed = Date.now() - startTime;
           console.log(`[anthropic ${reqId}] stream ended: ${elapsed}ms, stopReason=${streamState?.stopReason}, suppressStopEvents=${streamState?.suppressStopEvents}, continueCount=${continueCount}`);

@@ -119,9 +119,21 @@ function createAnthropicError(error) {
 function anthropicToOpenAIMessages(messages, system) {
   const openaiMessages = [];
 
+  // Sanitize system content: strip billing header if present
+  function sanitizeContent(text) {
+    if (typeof text === 'string') {
+      // Remove x-anthropic-billing-header line that may leak into content
+      text = text.replace(/^x-anthropic-billing-header:.*\n?/gm, '');
+      // Remove leading/trailing whitespace that accumulates
+      text = text.trim();
+    }
+    return text;
+  }
+
   if (system) {
-    const systemContent = typeof system === 'string' ? system :
+    let systemContent = typeof system === 'string' ? system :
       (Array.isArray(system) ? system.map(s => s.text).join('\n') : '');
+    systemContent = sanitizeContent(systemContent);
     if (systemContent) {
       openaiMessages.push({
         role: 'system',
@@ -135,7 +147,7 @@ function anthropicToOpenAIMessages(messages, system) {
     let content = msg.content;
 
     if (typeof content === 'string') {
-      openaiMessages.push({ role, content });
+      openaiMessages.push({ role, content: role === 'system' ? sanitizeContent(content) : content });
     } else if (Array.isArray(content)) {
       const textParts = [];
       const toolResults = [];
