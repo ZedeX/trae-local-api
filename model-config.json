@@ -12,20 +12,20 @@
     "claude-sonnet-4": { "function": "chat_v3", "config_name": "glm-5.2", "category": "claude-sonnet", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 1 },
     "claude-haiku-4-5": { "function": "chat_v3", "config_name": "glm-5.1", "category": "claude-haiku", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 2 },
     "claude-haiku-4-5-20251001": { "function": "chat_v3", "config_name": "glm-5.1", "category": "claude-haiku", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 2 },
-    "deepseek-v3": { "function": "chat_v3", "config_name": "DeepSeek-V4-Pro", "category": "deepseek", "toolcall_compatible": false, "multimodal": false, "reasoning": true, "tier": 2 },
-    "deepseek-v4-pro": { "function": "chat_v3", "config_name": "DeepSeek-V4-Pro", "category": "deepseek", "toolcall_compatible": false, "multimodal": false, "reasoning": true, "tier": 2 },
-    "deepseek-v4-flash": { "function": "chat_v3", "config_name": "DeepSeek-V4-Flash", "category": "deepseek", "toolcall_compatible": false, "multimodal": false, "reasoning": true, "tier": 3 },
+    "deepseek-v3": { "function": "chat_v3", "config_name": "DeepSeek-V4-Pro", "category": "deepseek", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 2 },
+    "deepseek-v4-pro": { "function": "chat_v3", "config_name": "DeepSeek-V4-Pro", "category": "deepseek", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 2 },
+    "deepseek-v4-flash": { "function": "chat_v3", "config_name": "DeepSeek-V4-Flash", "category": "deepseek", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 3 },
     "deepseek-r1": { "function": "chat_v3", "config_name": "custom_model_deepseek_reasoner", "category": "deepseek", "toolcall_compatible": false, "multimodal": false, "reasoning": true, "tier": 3 },
     "glm-5.2": { "function": "chat_v3", "config_name": "glm-5.2", "category": "glm", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 1 },
     "glm-5.1": { "function": "chat_v3", "config_name": "glm-5.1", "category": "glm", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 2 },
     "glm-5": { "function": "chat_v3", "config_name": "glm-5", "category": "glm", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 3 },
-    "glm-5v-turbo": { "function": "chat_v3", "config_name": "glm-5v-turbo", "category": "glm", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 5 },
+    "glm-5v-turbo": { "function": "chat_v3", "config_name": "glm-5v-turbo", "category": "glm", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 3 },
     "glm-4.7": { "function": "chat_v3", "config_name": "glm-4.7", "category": "glm", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 4 },
     "glm-4.6": { "function": "chat_v3", "config_name": "glm-4.6", "category": "glm", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 5 },
-    "doubao-seed-code": { "function": "chat_v3", "config_name": "Doubao_1_6", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 3 },
-    "doubao-seed-2.0-code": { "function": "chat_v3", "config_name": "Doubao-Seed-2.0-Code", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 1 },
+    "doubao-seed-code": { "function": "chat_v3", "config_name": "Doubao_1_6", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 5 },
+    "doubao-seed-2.0-code": { "function": "chat_v3", "config_name": "Doubao-Seed-2.0-Code", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 4 },
     "doubao-1.8": { "function": "chat_v3", "config_name": "doubao_1_8", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 3 },
-    "doubao-1-6": { "function": "chat_v3", "config_name": "Doubao_1_6", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 3 },
+    "doubao-1-6": { "function": "chat_v3", "config_name": "Doubao_1_6", "category": "doubao", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 5 },
     "minimax-m3": { "function": "chat_v3", "config_name": "minimax-m3", "category": "minimax", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 3 },
     "minimax-m2.7": { "function": "chat_v3", "config_name": "minimax-m2.7", "category": "minimax", "toolcall_compatible": true, "multimodal": false, "reasoning": true, "tier": 4 },
     "kimi-k2.6": { "function": "chat_v3", "config_name": "kimi-k2.6", "category": "kimi", "toolcall_compatible": true, "multimodal": true, "reasoning": true, "tier": 2 },
@@ -41,7 +41,7 @@
   "tiers": {
     "1": {
       "name": "旗舰",
-      "models": ["glm-5.2", "Doubao-Seed-2.0-Code"],
+      "models": ["glm-5.2"],
       "description": "最强编程能力，1M上下文"
     },
     "2": {
@@ -51,18 +51,18 @@
     },
     "3": {
       "name": "中等",
-      "models": ["glm-5", "qwen-3.6-plus", "minimax-m3", "Doubao_1_6", "DeepSeek-V4-Flash"],
+      "models": ["glm-5", "qwen-3.6-plus", "minimax-m3", "DeepSeek-V4-Flash", "glm-5v-turbo"],
       "description": "标准能力，性价比高"
     },
     "4": {
       "name": "轻量",
-      "models": ["glm-4.7", "kimi-k2", "qwen3-coder", "minimax-m2.7"],
+      "models": ["glm-4.7", "kimi-k2", "qwen3-coder", "minimax-m2.7", "Doubao-Seed-2.0-Code"],
       "description": "轻量快速"
     },
     "5": {
       "name": "最轻",
-      "models": ["glm-4.6", "glm-5v-turbo", "minimax-m2.1", "minimax-m2"],
-      "description": "最轻量，视觉专用"
+      "models": ["glm-4.6", "Doubao_1_6", "minimax-m2.1", "minimax-m2"],
+      "description": "最轻量"
     }
   },
   "fallback": {
