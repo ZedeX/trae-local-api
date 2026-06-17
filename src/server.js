@@ -5,7 +5,7 @@ const path = require('path');
 require('dotenv').config();
 
 const { getAuthInfo, getDeviceIds, isTokenExpired, getApiHost, refreshTokenIfNeeded, detectEdition } = require('./auth');
-const { llmUtilsChat, chatCompletion, createAgentTask, getModelDetailParam, getChatModes, resolveModelId, MODEL_MAP, REVERSE_MODEL_MAP, FUNCTION_MAP, getFallbackConfig, saveFallbackConfig, getFallbackChain } = require('./trae-client');
+const { llmUtilsChat, chatCompletion, createAgentTask, getModelDetailParam, getChatModes, resolveModelId, MODEL_MAP, REVERSE_MODEL_MAP, FUNCTION_MAP, getFallbackConfig, saveFallbackConfig, getFallbackChain, getRaceModels, isRaceFallbackEnabled, getTiers, getModelsInTier, getTierOfModel, isTieredFallbackEnabled, isRaceWithinTierEnabled, getFallbackModel, getSameTierModels, getNextTierModels, findMultimodalModel, getModelConfig, saveModelConfig, rebuildDerivedMaps } = require('./trae-client');
 const { createOpenAIChatCompletion, createOpenAIStreamChunk, createOpenAIModels, parseLlmUtilsChatStream, llmUtilsChunkToOpenAI, parseAgentTaskStream, parseTraeStreamChunk, traeChunkToOpenAI } = require('./openai-format');
 const {
   createAnthropicMessage,
@@ -43,14 +43,17 @@ const pendingSyncFiles = [];
 function isResponseTruncated(state) {
   if (!state || !state.messageStarted) return false;
 
-  // If stop_reason is tool_use, the model intentionally stopped to call a tool - don't continue
   if (state.hasToolUse) return false;
 
-  // If stop_reason is max_tokens, definitely truncated
   if (state.stopReason === 'max_tokens') return true;
 
-  // Check for incomplete text patterns
   const text = state.textContent || '';
+  const reasoning = state.reasoningContent || '';
+
+  if (!text && !state.hasToolUse && reasoning.length > 0) return true;
+
+  if (!state.hasToolUse && reasoning.length > 0 && text.length < 200) return true;
+
   if (!text) return false;
 
   // Open code block (``` without closing ```)
@@ -138,81 +141,94 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
   };
 
   responseBody.on('data', (chunk) => {
-    buffer += chunk.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+    try {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
 
-      const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
-      if (!parsed) continue;
+        const parsed = parseLlmUtilsChatStream(trimmed, currentEventName);
+        if (!parsed) continue;
 
-      if (parsed._type === 'event_name') {
-        currentEventName = parsed.value;
-        // 记录 SSE 事件名
-        if (logId) trafficLogger.logResponseChunk(logId, currentEventName, null);
-        continue;
-      }
+        if (parsed._type === 'event_name') {
+          currentEventName = parsed.value;
+          if (logId) trafficLogger.logResponseChunk(logId, currentEventName, null);
+          continue;
+        }
 
-      // 记录 SSE 数据
-      if (logId) trafficLogger.logResponseChunk(logId, currentEventName, parsed);
+        if (logId) trafficLogger.logResponseChunk(logId, currentEventName, parsed);
 
-      if (parsed.type === 'token_usage') {
-        tokenUsage = parsed.data;
-        if (logId) trafficLogger.logTokenUsage(logId, tokenUsage);
-        continue;
-      }
+        if (parsed.type === 'token_usage') {
+          tokenUsage = parsed.data;
+          if (logId) trafficLogger.logTokenUsage(logId, tokenUsage);
+          continue;
+        }
 
-      if (parsed.type === 'done') {
-        const usage = tokenUsage ? {
-          prompt_tokens: tokenUsage.prompt_tokens || 0,
-          completion_tokens: tokenUsage.completion_tokens || 0,
-          total_tokens: tokenUsage.total_tokens || 0,
-        } : undefined;
+        if (parsed.type === 'done') {
+          const usage = tokenUsage ? {
+            prompt_tokens: tokenUsage.prompt_tokens || 0,
+            completion_tokens: tokenUsage.completion_tokens || 0,
+            total_tokens: tokenUsage.total_tokens || 0,
+          } : undefined;
 
-        if (saveToPath && fullContent) {
-          try {
-            const dir = path.dirname(saveToPath);
-            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-            fs.writeFileSync(saveToPath, fullContent, 'utf-8');
-            console.log(`[file] Saved to: ${saveToPath}`);
-            syncFileToOutput(saveToPath);
-            const savedChunk = createOpenAIStreamChunk(completionId, modelName, {
-              content: `\n\n[File saved: ${saveToPath}]`
-            }, null);
-            res.write(`data: ${JSON.stringify(savedChunk)}\n\n`);
-          } catch (fileErr) {
-            console.error(`[file] Save failed: ${fileErr.message}`);
-            const errChunk = createOpenAIStreamChunk(completionId, modelName, {
-              content: `\n\n[File save failed: ${fileErr.message}]`
-            }, null);
-            res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
+          if (saveToPath && fullContent) {
+            try {
+              const dir = path.dirname(saveToPath);
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(saveToPath, fullContent, 'utf-8');
+              console.log(`[file] Saved to: ${saveToPath}`);
+              syncFileToOutput(saveToPath);
+              const savedChunk = createOpenAIStreamChunk(completionId, modelName, {
+                content: `\n\n[File saved: ${saveToPath}]`
+              }, null);
+              if (!res.writableEnded) res.write(`data: ${JSON.stringify(savedChunk)}\n\n`);
+            } catch (fileErr) {
+              console.error(`[file] Save failed: ${fileErr.message}`);
+              const errChunk = createOpenAIStreamChunk(completionId, modelName, {
+                content: `\n\n[File save failed: ${fileErr.message}]`
+              }, null);
+              if (!res.writableEnded) res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
+            }
           }
+
+          if (!res.writableEnded) {
+            const doneChunk = createOpenAIStreamChunk(completionId, modelName, {}, parsed.finish_reason || 'stop');
+            res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
+            res.write('data: [DONE]\n\n');
+            res.end();
+          }
+
+          if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
+          return;
         }
 
-        const doneChunk = createOpenAIStreamChunk(completionId, modelName, {}, parsed.finish_reason || 'stop');
-        res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
-        res.write('data: [DONE]\n\n');
-        res.end();
-
-        // 完成日志记录
-        if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
-        return;
+        const openaiChunk = llmUtilsChunkToOpenAI(parsed, completionId, modelName, true);
+        if (openaiChunk) {
+          if (parsed.type === 'text' && parsed.content) {
+            fullContent += parsed.content;
+            if (logId) trafficLogger.logResponseContent(logId, parsed.content, null);
+          }
+          if (parsed.type === 'text' && parsed.reasoning) {
+            fullReasoning += parsed.reasoning;
+            if (logId) trafficLogger.logResponseContent(logId, null, parsed.reasoning);
+          }
+          if (!res.writableEnded) res.write(`data: ${JSON.stringify(openaiChunk)}\n\n`);
+        }
       }
-
-      const openaiChunk = llmUtilsChunkToOpenAI(parsed, completionId, modelName, true);
-      if (openaiChunk) {
-        if (parsed.type === 'text' && parsed.content) {
-          fullContent += parsed.content;
-          if (logId) trafficLogger.logResponseContent(logId, parsed.content, null);
-        }
-        if (parsed.type === 'text' && parsed.reasoning) {
-          fullReasoning += parsed.reasoning;
-          if (logId) trafficLogger.logResponseContent(logId, null, parsed.reasoning);
-        }
-        res.write(`data: ${JSON.stringify(openaiChunk)}\n\n`);
+    } catch (err) {
+      console.error('[stream] Error in data callback:', err);
+      if (logId) trafficLogger.logError(logId, err);
+      try { responseBody.destroy(); } catch (e) {}
+      if (!res.writableEnded) {
+        try {
+          const errChunk = createOpenAIStreamChunk(completionId, modelName, { content: `\n\n[Stream error: ${err.message}]` }, 'stop');
+          res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } catch (e) {}
       }
     }
   });
@@ -984,6 +1000,13 @@ app.get('/v1/dashboard/log/:date/:workspace/:logId', authenticate, (req, res) =>
   res.json(entry);
 });
 
+app.get('/v1/dashboard/active/:logId', authenticate, (req, res) => {
+  const { logId } = req.params;
+  const detail = trafficLogger.getActiveRequestDetail(logId);
+  if (!detail) return res.status(404).json({ error: 'Active request not found', isActive: false });
+  res.json(detail);
+});
+
 // Fallback config API
 app.get('/v1/dashboard/fallback-config', authenticate, (req, res) => {
   res.json(getFallbackConfig());
@@ -1004,6 +1027,68 @@ app.post('/v1/dashboard/fallback-config', authenticate, (req, res) => {
     saveFallbackConfig(config);
     console.log('[fallback] Config updated via dashboard');
     res.json({ ok: true, config: getFallbackConfig() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/v1/dashboard/model-config', authenticate, (req, res) => {
+  res.json(getModelConfig());
+});
+
+app.post('/v1/dashboard/model-config', authenticate, (req, res) => {
+  try {
+    const config = req.body;
+    if (typeof config !== 'object' || config === null) {
+      return res.status(400).json({ error: 'Config must be an object' });
+    }
+    if (config.models && typeof config.models !== 'object') {
+      return res.status(400).json({ error: 'models must be an object' });
+    }
+    saveModelConfig(config);
+    rebuildDerivedMaps();
+    console.log('[model-config] Updated via dashboard');
+    res.json({ ok: true, config: getModelConfig() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/v1/dashboard/model-config/models', authenticate, (req, res) => {
+  try {
+    const { key, function: fn, config_name, category, toolcall_compatible } = req.body;
+    if (!key || !config_name) {
+      return res.status(400).json({ error: 'key and config_name are required' });
+    }
+    const config = getModelConfig();
+    if (!config.models) config.models = {};
+    config.models[key] = {
+      function: fn || 'chat_v3',
+      config_name,
+      category: category || 'custom',
+      toolcall_compatible: toolcall_compatible !== undefined ? toolcall_compatible : null,
+    };
+    saveModelConfig(config);
+    rebuildDerivedMaps();
+    console.log(`[model-config] Added/updated model: ${key} → ${config_name}`);
+    res.json({ ok: true, config: getModelConfig() });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.delete('/v1/dashboard/model-config/models/:key', authenticate, (req, res) => {
+  try {
+    const config = getModelConfig();
+    if (config.models && config.models[req.params.key]) {
+      delete config.models[req.params.key];
+      saveModelConfig(config);
+      rebuildDerivedMaps();
+      console.log(`[model-config] Deleted model: ${req.params.key}`);
+      res.json({ ok: true, config: getModelConfig() });
+    } else {
+      res.status(404).json({ error: 'Model not found' });
+    }
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1042,6 +1127,19 @@ app.post('/v1/messages', authenticate, async (req, res) => {
 
     const openaiMessages = anthropicToOpenAIMessages(messages, system);
 
+    // Detect if this is a multi-turn tool call conversation (has tool_result in messages)
+    let hasToolResult = false;
+    let hasToolUse = false;
+    for (const msg of messages) {
+      if (Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block.type === 'tool_result') hasToolResult = true;
+          if (block.type === 'tool_use') hasToolUse = true;
+        }
+      }
+    }
+    const isToolContinuation = hasToolResult && hasToolUse;
+
     // If Claude Code sends tools, inject them into the conversation
     // so the Trae model knows about available tools and uses correct tool names
     let toolMap = null;  // maps lowercase tool name -> original tool name
@@ -1050,12 +1148,8 @@ app.post('/v1/messages', authenticate, async (req, res) => {
       const toolDescriptions = tools.map(t => {
         const nameLower = t.name.toLowerCase();
         toolMap[nameLower] = t.name;
-        // Also map common aliases
-        if (nameLower === 'glob' || nameLower === 'listdir' || nameLower === 'list_files') {
-          toolMap['listdir'] = t.name;
-          toolMap['glob'] = t.name;
-          toolMap['list_files'] = t.name;
-        }
+        // Map all Claude Code tool name variants
+        // File operations
         if (nameLower === 'read' || nameLower === 'read_file') {
           toolMap['read_file'] = t.name;
           toolMap['read'] = t.name;
@@ -1064,16 +1158,54 @@ app.post('/v1/messages', authenticate, async (req, res) => {
           toolMap['write_file'] = t.name;
           toolMap['write'] = t.name;
         }
+        if (nameLower === 'edit' || nameLower === 'edit_file') {
+          toolMap['edit_file'] = t.name;
+          toolMap['edit'] = t.name;
+        }
+        if (nameLower === 'multiedit' || nameLower === 'multi_edit') {
+          toolMap['multiedit'] = t.name;
+          toolMap['multi_edit'] = t.name;
+        }
+        // Search/list operations
+        if (nameLower === 'glob' || nameLower === 'listdir' || nameLower === 'list_files') {
+          toolMap['listdir'] = t.name;
+          toolMap['glob'] = t.name;
+          toolMap['list_files'] = t.name;
+        }
+        if (nameLower === 'grep' || nameLower === 'search_files') {
+          toolMap['grep'] = t.name;
+          toolMap['search_files'] = t.name;
+        }
+        // Command execution
         if (nameLower === 'bash' || nameLower === 'execute_command' || nameLower === 'run_command') {
           toolMap['execute_command'] = t.name;
           toolMap['bash'] = t.name;
           toolMap['run_command'] = t.name;
         }
+        // Web operations
+        if (nameLower === 'webfetch' || nameLower === 'fetch_url' || nameLower === 'web_fetch') {
+          toolMap['webfetch'] = t.name;
+          toolMap['fetch_url'] = t.name;
+          toolMap['web_fetch'] = t.name;
+        }
+        if (nameLower === 'websearch' || nameLower === 'search_internet' || nameLower === 'web_search') {
+          toolMap['websearch'] = t.name;
+          toolMap['search_internet'] = t.name;
+          toolMap['web_search'] = t.name;
+        }
         const params = t.input_schema?.properties ? Object.keys(t.input_schema.properties).join(', ') : '';
         return `- ${t.name}(${params}): ${t.description?.substring(0, 200) || ''}`;
       }).join('\n');
 
-      const toolSystemMsg = `\n\n<available_tools>\nYou have access to the following tools. When you need to use a tool, output a <toolcall> block with the EXACT tool name and params:\n<toolcall>{"name": "ToolName", "params": { "param1": "value1" }}</toolcall>\n\nAvailable tools:\n${toolDescriptions}\n\nIMPORTANT: Use the EXACT tool names listed above (case-sensitive). Do NOT use other tool names.\n</available_tools>`;
+      // Build tool system message with clear instructions for multi-turn tool use
+      let toolSystemMsg = `\n\n<available_tools>\nYou have access to the following tools. To call a tool, output a toolcall block in JSON format:\n<toolcall>{"name": "ToolName", "params": {"param1": "value1"}}</toolcall>\n\nCRITICAL RULES:\n- The <toolcall> block MUST contain valid JSON with "name" and "params" keys\n- Do NOT use XML attributes like: ToolName param="value"\n- Do NOT use <arg_key>/<arg_value> tags\n- Use the EXACT tool names listed below (case-sensitive)\n- Output the <toolcall> block directly in your response, not inside other tags\n\nAvailable tools:\n${toolDescriptions}\n`;
+
+      // If this is a tool continuation (tool_result was sent back), add explicit instruction
+      if (isToolContinuation) {
+        toolSystemMsg += `\nCRITICAL: You are in a multi-turn tool use conversation. The user has sent back tool results from your previous tool calls. You MUST:\n1. Analyze the tool results carefully\n2. If you need more information, call another tool using <toolcall> format\n3. If you have enough information to answer the user's question, provide your final answer as text\n4. Do NOT just say "I've completed the task" without providing the actual information or result the user requested\n5. Do NOT stop prematurely - continue working until the task is fully complete\n`;
+      }
+
+      toolSystemMsg += `</available_tools>`;
 
       // Inject into the first system message or prepend as system message
       const systemMsg = openaiMessages.find(m => m.role === 'system');
@@ -1083,7 +1215,17 @@ app.post('/v1/messages', authenticate, async (req, res) => {
         openaiMessages.unshift({ role: 'system', content: toolSystemMsg });
       }
 
-      console.log(`[anthropic ${reqId}] Injected ${tools.length} tools into system prompt, toolMap: ${JSON.stringify(Object.keys(toolMap))}`);
+      console.log(`[anthropic ${reqId}] Injected ${tools.length} tools into system prompt, isToolContinuation=${isToolContinuation}, toolMap: ${JSON.stringify(Object.keys(toolMap))}`);
+    } else if (isToolContinuation) {
+      // Tool continuation but no tools sent in this request - still need to instruct the model
+      const systemMsg = openaiMessages.find(m => m.role === 'system');
+      const continuationMsg = `\n\nIMPORTANT: You are in a multi-turn tool use conversation. The user has sent back tool results. You MUST analyze the results and continue working. If you need more information, call another tool. Otherwise, provide a complete answer. Do NOT stop prematurely.`;
+      if (systemMsg) {
+        systemMsg.content += continuationMsg;
+      } else {
+        openaiMessages.unshift({ role: 'system', content: continuationMsg });
+      }
+      console.log(`[anthropic ${reqId}] Tool continuation detected (no tools in request), added continuation instruction`);
     }
 
     // Log first user message for context
@@ -1106,6 +1248,26 @@ app.post('/v1/messages', authenticate, async (req, res) => {
     if (temperature !== undefined) options.temperature = temperature;
     options.workspace = extractWorkspace(req);
 
+    // Multimodal detection: if messages contain image content, switch to a multimodal model
+    const hasImageContent = openaiMessages.some(m => {
+      if (Array.isArray(m.content)) {
+        return m.content.some(c => c.type === 'image' || c.type === 'image_url');
+      }
+      return false;
+    });
+
+    if (hasImageContent) {
+      const currentConfig = resolveModelId(modelName);
+      const modelEntry = MODEL_MAP[Object.keys(MODEL_MAP).find(k => MODEL_MAP[k].config_name === currentConfig)];
+      if (!modelEntry?.multimodal) {
+        const mmModel = findMultimodalModel(currentConfig);
+        if (mmModel) {
+          console.log(`[anthropic ${reqId}] Image content detected, switching to multimodal model: ${mmModel}`);
+          options.config_name = mmModel;
+        }
+      }
+    }
+
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
@@ -1125,9 +1287,11 @@ app.post('/v1/messages', authenticate, async (req, res) => {
 
       let streamState = null;
       let continueCount = 0;
+      let lastShortText = '';
       let lastQueuePosition = 0;
       let currentMessages = [...openaiMessages];
       let fallbackAttempted = {};  // 记录已尝试的降级模型
+      let raceTriggered = false;   // 是否已触发并发竞速
       let currentConfigName = null;  // 当前使用的 config_name
 
       // Helper: process a single llmUtilsChat stream
@@ -1145,6 +1309,25 @@ app.post('/v1/messages', authenticate, async (req, res) => {
         return new Promise((resolve, reject) => {
           let streamBuffer = '';
           let streamEventName = '';
+
+          // Send message_start immediately so CC doesn't time out during queue wait
+          // CC expects message_start as the first event; without it, CC aborts after ~60s
+          if (!streamState || !streamState.messageStarted) {
+            if (!streamState) {
+              streamState = {
+                messageStarted: false, messageStopped: false,
+                contentBlockIndex: -1, currentContentType: null,
+                textContent: '', toolCalls: [], outputTokenCount: 0,
+                reasoningContent: '', stopReason: null,
+                suppressStopEvents: false, pendingToolCalls: [],
+                toolCallBuffer: '', inToolCall: false, hasToolUse: false,
+                toolCallIndex: {}
+              };
+            }
+            sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
+            streamState.messageStarted = true;
+            console.log(`[anthropic ${reqId}] Sent message_start early (before queue/content)`);
+          }
 
           result.body.on('data', (chunk) => {
             try {
@@ -1179,8 +1362,8 @@ app.post('/v1/messages', authenticate, async (req, res) => {
                   continue;
                 }
 
-                // Inject queue position as text into Anthropic stream
-                // so Claude Code CLI can see the waiting status
+                // Queue position handling - send as ping only, NOT as text content
+                // Text content would pollute Claude Code's conversation history
                 if (parsed.type === 'queue_wait' && parsed.position > 0) {
                   if (parsed.position !== lastQueuePosition) {
                     lastQueuePosition = parsed.position;
@@ -1188,77 +1371,78 @@ app.post('/v1/messages', authenticate, async (req, res) => {
                     // 检查是否需要降级
                     const fbConfig = getFallbackConfig();
                     if (fbConfig.autoFallback && parsed.position > fbConfig.queueThreshold) {
+                      // Tier-based fallback: try same-tier race first, then next tier
+                      if (isTieredFallbackEnabled()) {
+                        const currentConfig = currentConfigName || modelName;
+                        const sameTier = getSameTierModels(currentConfig).filter(m => !fallbackAttempted[m]);
+
+                        if (sameTier.length > 0 && isRaceWithinTierEnabled()) {
+                          // Race within same tier: all untried same-tier models concurrently
+                          for (const m of sameTier) fallbackAttempted[m] = true;
+                          console.log(`[fallback] Queue #${parsed.position} > threshold, RACE within tier: ${sameTier.join(', ')}`);
+
+                          result.body.destroy();
+                          finalizeStreamLog();
+                          sendEvent('ping', { type: 'ping' });
+                          lastQueuePosition = 0;
+
+                          resolve({ fallback: true, raceModels: sameTier });
+                          return;
+                        }
+
+                        // No same-tier models left, try next tier
+                        const attemptedList = Object.keys(fallbackAttempted);
+                        const nextTierModels = getNextTierModels(currentConfig, attemptedList);
+                        if (nextTierModels.length > 0) {
+                          const nextModel = nextTierModels[0];
+                          fallbackAttempted[nextModel] = true;
+                          console.log(`[fallback] Queue #${parsed.position} > threshold, falling back to next tier: ${nextModel}`);
+
+                          result.body.destroy();
+                          finalizeStreamLog();
+                          sendEvent('ping', { type: 'ping' });
+                          lastQueuePosition = 0;
+
+                          resolve({ fallback: true, nextModel });
+                          return;
+                        }
+
+                        // All tiers exhausted - use fallbackModel as last resort
+                        const fbModel = getFallbackModel();
+                        if (!fallbackAttempted[fbModel]) {
+                          fallbackAttempted[fbModel] = true;
+                          console.log(`[fallback] All tiers exhausted, using fallback model: ${fbModel}`);
+
+                          result.body.destroy();
+                          finalizeStreamLog();
+                          sendEvent('ping', { type: 'ping' });
+                          lastQueuePosition = 0;
+
+                          resolve({ fallback: true, nextModel: fbModel });
+                          return;
+                        }
+                      }
+
+                      // Legacy fallback chain (for backward compatibility)
                       const fallbackChain = getFallbackChain(modelName);
-                      // 找到第一个未尝试的降级模型
                       const nextModel = fallbackChain.find(m => !fallbackAttempted[m]);
                       if (nextModel) {
                         fallbackAttempted[nextModel] = true;
                         console.log(`[fallback] Queue #${parsed.position} > threshold ${fbConfig.queueThreshold}, falling back to ${nextModel}`);
-                        
-                        // 中断当前请求
+
                         result.body.destroy();
-                        
-                        // 立即 finalize 当前流的日志（close 事件可能延迟）
                         finalizeStreamLog();
-                        
-                        // 注入降级通知到流中
-                        if (!streamState) {
-                          streamState = {
-                            messageStarted: false, messageStopped: false,
-                            contentBlockIndex: -1, currentContentType: null,
-                            textContent: '', toolCalls: [], outputTokenCount: 0,
-                            reasoningContent: '', stopReason: null,
-                            suppressStopEvents: false, pendingToolCalls: []
-                          };
-                        }
-                        if (!streamState.messageStarted) {
-                          sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
-                          streamState.messageStarted = true;
-                        }
-                        if (streamState.currentContentType !== 'text') {
-                          if (streamState.contentBlockIndex >= 0) {
-                            sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
-                          }
-                          streamState.contentBlockIndex++;
-                          sendEvent('content_block_start', createAnthropicContentBlockStart(streamState.contentBlockIndex, 'text', { text: '' }));
-                          streamState.currentContentType = 'text';
-                        }
-                        sendEvent('content_block_delta', createAnthropicContentBlockDelta(streamState.contentBlockIndex, { type: 'text_delta', text: `[⬇️ 排队 #${parsed.position} > ${fbConfig.queueThreshold}，降级到 ${nextModel}]\n` }));
-                        
-                        // 重置流状态，用降级模型重新发起请求
-                        streamState.currentContentType = null;
-                        streamState.contentBlockIndex++;
+                        sendEvent('ping', { type: 'ping' });
                         lastQueuePosition = 0;
-                        
-                        // 用降级模型重试
+
                         resolve({ fallback: true, nextModel });
                         return;
                       }
                     }
 
-                    if (!streamState) {
-                      streamState = {
-                        messageStarted: false, messageStopped: false,
-                        contentBlockIndex: -1, currentContentType: null,
-                        textContent: '', toolCalls: [], outputTokenCount: 0,
-                        reasoningContent: '', stopReason: null,
-                        suppressStopEvents: false, pendingToolCalls: []
-                      };
-                    }
-                    if (!streamState.messageStarted) {
-                      sendEvent('message_start', createAnthropicMessageStart(messageId, modelName, { input_tokens: 0 }));
-                      streamState.messageStarted = true;
-                    }
-                    if (streamState.currentContentType !== 'text') {
-                      if (streamState.contentBlockIndex >= 0) {
-                        sendEvent('content_block_stop', { type: 'content_block_stop', index: streamState.contentBlockIndex });
-                      }
-                      streamState.contentBlockIndex++;
-                      sendEvent('content_block_start', createAnthropicContentBlockStart(streamState.contentBlockIndex, 'text', { text: '' }));
-                      streamState.currentContentType = 'text';
-                    }
-                    const queueText = `[⏳ 排队 #${parsed.position}]\n`;
-                    sendEvent('content_block_delta', createAnthropicContentBlockDelta(streamState.contentBlockIndex, { type: 'text_delta', text: queueText }));
+                    // Send ping to keep connection alive during queue wait
+                    // Do NOT send queue position as text - it pollutes Claude Code's context
+                    sendEvent('ping', { type: 'ping' });
                   }
                   continue;
                 }
@@ -1345,8 +1529,62 @@ app.post('/v1/messages', authenticate, async (req, res) => {
 
           // 处理降级重试
           if (streamResult && streamResult.fallback) {
-            console.log(`[anthropic ${reqId}] Retrying with fallback model: ${streamResult.nextModel}`);
-            continue;  // 重新进入循环，用降级模型重试
+            if (streamResult.raceModels) {
+              // Tier-based race: concurrent requests to same-tier models
+              // First to produce content wins, others are abandoned
+              console.log(`[anthropic ${reqId}] Launching TIER RACE: concurrent requests to ${streamResult.raceModels.join(', ')}`);
+
+              const raceModels = streamResult.raceModels;
+              let raceWinner = null;
+              const raceAborted = new Set();
+
+              const racePromises = raceModels.map(raceModel => {
+                return processStream(currentMessages, raceModel).then(r => {
+                  if (!r.fallback && !raceWinner) {
+                    raceWinner = raceModel;
+                    console.log(`[anthropic ${reqId}] TIER RACE winner: ${raceModel}`);
+                    // Abort other race participants
+                    for (const m of raceModels) {
+                      if (m !== raceModel) raceAborted.add(m);
+                    }
+                  }
+                  return { ...r, _raceModel: raceModel };
+                });
+              });
+
+              // Wait for first to produce content
+              await Promise.race(racePromises);
+
+              if (!raceWinner) {
+                // All race models also queued - continue with original model
+                console.log(`[anthropic ${reqId}] All tier race models also queued, continuing with original`);
+              }
+            } else if (streamResult.race) {
+              // Legacy race fallback
+              console.log(`[anthropic ${reqId}] Launching RACE mode: concurrent requests to ${getRaceModels().join(', ')}`);
+
+              const raceModels = getRaceModels();
+              let raceWinner = null;
+
+              const racePromises = raceModels.map(raceModel => {
+                return processStream(currentMessages, raceModel).then(r => {
+                  if (!r.fallback && !raceWinner) {
+                    raceWinner = raceModel;
+                    console.log(`[anthropic ${reqId}] RACE winner: ${raceModel}`);
+                  }
+                  return { ...r, _raceModel: raceModel };
+                });
+              });
+
+              await Promise.race(racePromises);
+
+              if (!raceWinner) {
+                console.log(`[anthropic ${reqId}] All race models also queued, continuing with original`);
+              }
+            } else {
+              console.log(`[anthropic ${reqId}] Retrying with fallback model: ${streamResult.nextModel}`);
+              continue;  // 重新进入循环，用降级模型重试
+            }
           }
 
           const elapsed = Date.now() - startTime;
@@ -1354,13 +1592,41 @@ app.post('/v1/messages', authenticate, async (req, res) => {
 
           // Check if we should auto-continue
           if (AUTO_CONTINUE && streamState && streamState.messageStopped && isResponseTruncated(streamState) && continueCount < MAX_CONTINUES) {
-            continueCount++;
-            console.log(`[anthropic ${reqId}] Response truncated (stopReason=${streamState.stopReason}), auto-continuing (${continueCount}/${MAX_CONTINUES})...`);
+            const currentText = (streamState.textContent || '').trim();
+            const isShortResponse = currentText.length < 200;
 
-            // Build continue messages
+            if (isShortResponse && lastShortText && currentText.length > 0) {
+              const overlap = Math.min(lastShortText.length, currentText.length);
+              let sameChars = 0;
+              for (let i = 0; i < overlap; i++) {
+                if (lastShortText[i] === currentText[i]) sameChars++;
+              }
+              const similarity = overlap > 0 ? sameChars / overlap : 0;
+              if (similarity > 0.5) {
+                console.log(`[anthropic ${reqId}] Short response repeated (similarity=${(similarity*100).toFixed(0)}%), stopping auto-continue to avoid loop`);
+                if (streamState.messageStopped && streamState.suppressStopEvents && !res.writableEnded) {
+                  const finalReason = streamState.hasToolUse ? 'tool_use' : (streamState.stopReason || 'end_turn');
+                  sendEvent('message_delta', createAnthropicMessageDelta(finalReason, { output_tokens: streamState.outputTokenCount || 0 }));
+                  sendEvent('message_stop', { type: 'message_stop' });
+                }
+                break;
+              }
+            }
+
+            if (isShortResponse) {
+              lastShortText = currentText;
+            }
+
+            continueCount++;
+            const isEmptyResponse = !streamState.textContent && !streamState.hasToolUse && (streamState.reasoningContent || '').length > 0;
+            const continueMsg = isEmptyResponse
+              ? 'Your previous response contained only thinking/reasoning with no actual output. Please provide your actual response now - either text content or a tool call.'
+              : '请继续输出，从你中断的地方继续。';
+            console.log(`[anthropic ${reqId}] ${isEmptyResponse ? 'Empty response (reasoning only)' : 'Response truncated'} (stopReason=${streamState.stopReason}), auto-continuing (${continueCount}/${MAX_CONTINUES})...`);
+
             const assistantText = streamState.textContent || '';
             currentMessages.push({ role: 'assistant', content: assistantText });
-            currentMessages.push({ role: 'user', content: '请继续输出，从你中断的地方继续。' });
+            currentMessages.push({ role: 'user', content: continueMsg });
 
             // Reset streamState for the next iteration
             const savedContentBlockIndex = streamState.contentBlockIndex;
@@ -1513,7 +1779,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
           const toolId = tc.id || `toolu_${uuidv4().replace(/-/g, '').substring(0, 24)}`;
           const toolName = tc.function?.name || tc.name || '';
           const toolInput = typeof tc.function?.arguments === 'string'
-            ? JSON.parse(tc.function.arguments) : (tc.input || {});
+            ? (function(){ try { return JSON.parse(tc.function.arguments); } catch(e) { return { _raw: tc.function.arguments }; } })() : (tc.input || {});
           contentBlocks.push({
             type: 'tool_use',
             id: toolId,

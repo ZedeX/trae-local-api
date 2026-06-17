@@ -3,13 +3,43 @@ const { v4: uuidv4 } = require('./uuid');
 const {
   getAuthInfo, getDeviceIds, getApiHost, buildCommonHeaders,
   buildStreamHeaders, isTokenExpired, refreshTokenIfNeeded,
-  detectEdition, getDeviceInfo
+  detectEdition, getDeviceInfo, getIdeVersion, getIdeVersionCode
 } = require('./auth');
 const trafficLogger = require('./traffic-logger');
 const fs = require('fs');
 const path = require('path');
 
 const FALLBACK_CONFIG_PATH = path.join(__dirname, '..', 'model-fallback.json');
+const MODEL_CONFIG_PATH = path.join(__dirname, '..', 'model-config.json');
+
+let modelConfig = { models: {}, fallback: { autoFallback: true, queueThreshold: 500, mappings: {} }, settings: {} };
+
+function loadModelConfig() {
+  try {
+    if (fs.existsSync(MODEL_CONFIG_PATH)) {
+      const raw = fs.readFileSync(MODEL_CONFIG_PATH, 'utf-8');
+      modelConfig = JSON.parse(raw);
+      console.log('[model-config] Loaded', Object.keys(modelConfig.models || {}).length, 'model mappings from model-config.json');
+    } else {
+      console.log('[model-config] model-config.json not found, using defaults');
+    }
+  } catch (e) {
+    console.error('[model-config] Failed to load:', e.message);
+  }
+}
+
+function saveModelConfig(config) {
+  try {
+    fs.writeFileSync(MODEL_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
+    modelConfig = config;
+  } catch (e) {
+    console.error('[model-config] Failed to save:', e.message);
+  }
+}
+
+function getModelConfig() {
+  return JSON.parse(JSON.stringify(modelConfig));
+}
 
 let fallbackConfig = { autoFallback: true, queueThreshold: 500, mappings: {} };
 
@@ -18,6 +48,9 @@ function loadFallbackConfig() {
     if (fs.existsSync(FALLBACK_CONFIG_PATH)) {
       const raw = fs.readFileSync(FALLBACK_CONFIG_PATH, 'utf-8');
       fallbackConfig = JSON.parse(raw);
+    }
+    if (modelConfig.fallback && Object.keys(modelConfig.fallback).length > 0) {
+      fallbackConfig = { ...fallbackConfig, ...modelConfig.fallback };
     }
   } catch (e) {
     console.error('[fallback] Failed to load config:', e.message);
@@ -37,7 +70,26 @@ function getFallbackConfig() {
   return { ...fallbackConfig };
 }
 
+loadModelConfig();
 loadFallbackConfig();
+
+let modelConfigWatcher = null;
+function watchModelConfig() {
+  if (modelConfigWatcher) return;
+  try {
+    modelConfigWatcher = fs.watch(MODEL_CONFIG_PATH, (eventType) => {
+      if (eventType === 'change') {
+        setTimeout(() => {
+          loadModelConfig();
+          loadFallbackConfig();
+          rebuildDerivedMaps();
+          console.log('[model-config] Reloaded (hot)');
+        }, 100);
+      }
+    });
+  } catch (e) {}
+}
+watchModelConfig();
 
 let fallbackConfigWatcher = null;
 function watchFallbackConfig() {
@@ -133,74 +185,26 @@ const FUNCTION_MAP = {
   'system_diagnosis': 'system_diagnosis',
 };
 
-const MODEL_TO_FUNCTION = {
-  // Claude Opus 系列 → GLM-5.1（最强推理）
-  'claude-opus-4-7': { function: 'chat_v3', config_name: 'glm-5.1' },
-  'claude-opus-4-6': { function: 'chat_v3', config_name: 'glm-5.1' },
-  'claude-opus-4-5': { function: 'chat_v3', config_name: 'glm-5.1' },
-  'claude-opus-4-5-20251101': { function: 'chat_v3', config_name: 'glm-5.1' },
-  // Claude Sonnet 系列 → DeepSeek-V4-Pro（toolcall 更稳定）
-  'claude-sonnet-4-6': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'claude-sonnet-4-5': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'claude-sonnet-4-5-20250929': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'claude-3.5-sonnet': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'claude-3.7-sonnet': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'claude-sonnet-4': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  // Claude Haiku 系列 → DeepSeek-V4-Flash（最快）
-  'claude-haiku-4-5': { function: 'chat_v3', config_name: 'DeepSeek-V4-Flash' },
-  'claude-haiku-4-5-20251001': { function: 'chat_v3', config_name: 'DeepSeek-V4-Flash' },
-  // DeepSeek 系列
-  'deepseek-v3': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'deepseek-v4-pro': { function: 'chat_v3', config_name: 'DeepSeek-V4-Pro' },
-  'deepseek-v4-flash': { function: 'chat_v3', config_name: 'DeepSeek-V4-Flash' },
-  'deepseek-r1': { function: 'chat_v3', config_name: 'deepseek-r1' },
-  // GLM 系列
-  'glm-5': { function: 'chat_v3', config_name: 'glm-5' },
-  'glm-5.1': { function: 'chat_v3', config_name: 'glm-5.1' },
-  'glm-5v-turbo': { function: 'chat_v3', config_name: 'GLM-5V-Turbo' },
-  // Doubao 系列（代码专用）
-  'doubao-seed-code': { function: 'chat_v3', config_name: 'Doubao-Seed-Code' },
-  'doubao-seed-2.0-code': { function: 'chat_v3', config_name: 'Doubao-Seed-2.0-Code' },
-  'doubao-1.5-pro': { function: 'chat_v3', config_name: 'doubao-1.5-pro' },
-  'doubao-1-6': { function: 'chat_v3', config_name: 'Doubao_1_6' },
-  // MiniMax 系列
-  'minimax-m2.7': { function: 'chat_v3', config_name: 'MiniMax-M2.7' },
-  'minimax-m2.5': { function: 'chat_v3', config_name: 'MiniMax-M2.5' },
-  // Kimi 系列
-  'kimi-k2.6': { function: 'chat_v3', config_name: 'Kimi-K2.6' },
-  'kimi-k2.5': { function: 'chat_v3', config_name: 'Kimi-K2.5' },
-  // Qwen 系列
-  'qwen3.6-plus': { function: 'chat_v3', config_name: 'Qwen3.6-Plus' },
-  'qwen3.5-plus': { function: 'chat_v3', config_name: 'Qwen3.5-Plus' },
-  // 其他模型
-  'gpt-4o': { function: 'chat_v3', config_name: 'gpt-4o' },
-  'gpt-4o-mini': { function: 'chat_v3', config_name: 'gpt-4o-mini' },
-  'gemini-2.0-flash': { function: 'chat_v3', config_name: 'gemini-2.0-flash' },
-  'gemini-2.5-pro': { function: 'chat_v3', config_name: 'gemini-2.5-pro' },
-};
+let MODEL_TO_FUNCTION = {};
+let MODEL_MAP = {};
+let REVERSE_MODEL_MAP = {};
 
-const MODEL_MAP = {
-  'claude-3.5-sonnet': 'claude-3.5-sonnet',
-  'claude-3.7-sonnet': 'claude37',
-  'claude-sonnet-4': 'claude-sonnet-4',
-  'claude-sonnet-4-6': 'glm-5.1',
-  'gpt-4o': 'gpt-4o',
-  'gpt-4o-mini': 'gpt-4o-mini',
-  'gemini-2.0-flash': 'gemini-2.0-flash',
-  'gemini-2.5-pro': 'gemini-2.5-pro',
-  'deepseek-v3': 'deepseek-v3',
-  'deepseek-r1': 'deepseek-r1',
-  'doubao-1.5-pro': 'doubao-1.5-pro',
-  'doubao-1-6': 'doubao-1-6',
-  'glm-5': 'glm-5',
-  'glm-5.1': 'glm-5.1',
-  'auto': 'auto'
-};
-
-const REVERSE_MODEL_MAP = {};
-for (const [k, v] of Object.entries(MODEL_MAP)) {
-  REVERSE_MODEL_MAP[v] = k;
+function rebuildDerivedMaps() {
+  MODEL_TO_FUNCTION = {};
+  MODEL_MAP = {};
+  REVERSE_MODEL_MAP = {};
+  const models = modelConfig.models || {};
+  for (const [key, val] of Object.entries(models)) {
+    MODEL_TO_FUNCTION[key] = { function: val.function || 'chat_v3', config_name: val.config_name || key };
+    MODEL_MAP[key] = val.config_name || key;
+  }
+  MODEL_MAP['auto'] = 'auto';
+  for (const [k, v] of Object.entries(MODEL_MAP)) {
+    REVERSE_MODEL_MAP[v] = k;
+  }
 }
+
+rebuildDerivedMaps();
 
 function resolveModelId(modelName) {
   const lower = modelName.toLowerCase();
@@ -232,6 +236,94 @@ function getFallbackChain(modelName) {
   const lower = (modelName || '').toLowerCase();
   const mappings = fallbackConfig.mappings || {};
   return mappings[lower] || [];
+}
+
+function getRaceModels() {
+  return fallbackConfig.raceModels || [];
+}
+
+function isRaceFallbackEnabled() {
+  return fallbackConfig.raceFallback === true && getRaceModels().length > 0;
+}
+
+// Tier-based model management
+function getTiers() {
+  return modelConfig.tiers || {};
+}
+
+function getModelsInTier(tierNum) {
+  const tiers = getTiers();
+  const tier = tiers[String(tierNum)] || tiers[tierNum];
+  return tier ? (tier.models || []) : [];
+}
+
+function getTierOfModel(configName) {
+  const tiers = getTiers();
+  for (const [num, tier] of Object.entries(tiers)) {
+    if ((tier.models || []).includes(configName)) {
+      return parseInt(num, 10);
+    }
+  }
+  // Also check model entries for tier field
+  const modelEntry = modelConfig.models?.[configName];
+  if (modelEntry?.tier) return modelEntry.tier;
+  return null;
+}
+
+function isTieredFallbackEnabled() {
+  return fallbackConfig.tieredFallback === true;
+}
+
+function isRaceWithinTierEnabled() {
+  return fallbackConfig.raceWithinTier === true;
+}
+
+function getFallbackModel() {
+  return fallbackConfig.fallbackModel || 'glm-5';
+}
+
+// Get all models in the same tier as the given config_name (excluding itself)
+function getSameTierModels(configName) {
+  const tier = getTierOfModel(configName);
+  if (!tier) return [];
+  const tierModels = getModelsInTier(tier);
+  return tierModels.filter(m => m !== configName);
+}
+
+// Get models from the next lower tier (higher number = lower priority)
+function getNextTierModels(configName, attemptedModels) {
+  const currentTier = getTierOfModel(configName);
+  if (!currentTier) return [];
+  const nextTier = currentTier + 1;
+  const tierModels = getModelsInTier(nextTier);
+  // Filter out already-attempted models and non-toolcall models if tools are needed
+  return tierModels.filter(m => !attemptedModels.includes(m));
+}
+
+// Find a multimodal model in the same or nearest tier
+function findMultimodalModel(configName) {
+  const currentTier = getTierOfModel(configName) || 1;
+
+  // First try same tier
+  for (let t = currentTier; t <= 5; t++) {
+    const tierModels = getModelsInTier(t);
+    for (const m of tierModels) {
+      if (m === configName) continue;
+      const entry = modelConfig.models?.[m];
+      if (entry?.multimodal === true) {
+        return m;
+      }
+    }
+  }
+
+  // Fallback: search all models for any multimodal
+  for (const [name, entry] of Object.entries(modelConfig.models || {})) {
+    if (entry.multimodal === true && name !== configName) {
+      return name;
+    }
+  }
+
+  return null;
 }
 
 async function ensureAuth() {
@@ -268,14 +360,20 @@ async function llmUtilsChat(messages, model, stream, options) {
     const configName = options?.config_name || modelOpts?.config_name;
     if (configName && funcName !== 'inline_chat') {
       body.config_name = configName;
-    }
-
-    const modelName = options?.model_name || (model && model !== 'auto' ? model : null);
-    if (modelName) {
-      body.model = modelName;
+      body.model = configName;
+    } else {
+      const modelName = options?.model_name || (model && model !== 'auto' ? model : null);
+      if (modelName) {
+        body.model = modelName;
+      }
     }
 
     const requestId = uuidv4();
+
+    if (options?.max_tokens && typeof options.max_tokens === 'number') {
+      body.max_tokens = Math.min(options.max_tokens, 128000);
+    }
+
     const headers = buildStreamHeaders(authInfo, deviceIds, requestId);
 
     const endpoint = `${apiHost}/api/agent/v3/llm_utils_chat`;
@@ -424,8 +522,8 @@ async function createAgentTask(messages, model, stream, options) {
         : '',
       placeholder_map: '{}',
     },
-    ide_version: '3.3.55',
-    ide_version_code: '20260401',
+    ide_version: getIdeVersion(),
+    ide_version_code: getIdeVersionCode(),
     device_id: getDeviceInfo().device_id,
     extra_info: JSON.stringify({
       workspace_folder: workspaceDir,
@@ -568,5 +666,20 @@ module.exports = {
   getFallbackConfig,
   saveFallbackConfig,
   getFallbackChain,
-  loadFallbackConfig
+  getRaceModels,
+  isRaceFallbackEnabled,
+  getTiers,
+  getModelsInTier,
+  getTierOfModel,
+  isTieredFallbackEnabled,
+  isRaceWithinTierEnabled,
+  getFallbackModel,
+  getSameTierModels,
+  getNextTierModels,
+  findMultimodalModel,
+  loadFallbackConfig,
+  getModelConfig,
+  saveModelConfig,
+  loadModelConfig,
+  rebuildDerivedMaps,
 };

@@ -44,6 +44,21 @@ let currentWorkspace = '';
 // 活跃的请求记录（流式响应时暂存）
 const activeLogs = new Map();
 
+// Periodic sweep: remove abandoned log entries older than 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  const SWEEP_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+  for (const [logId, active] of activeLogs.entries()) {
+    const age = now - (active.startTime || 0);
+    if (age > SWEEP_TIMEOUT) {
+      console.warn(`[traffic-logger] Sweeping abandoned log: ${logId} (age: ${Math.round(age/1000)}s)`);
+      try {
+        activeLogs.delete(logId);
+      } catch (e) {}
+    }
+  }
+}, 5 * 60 * 1000).unref(); // Run every 5 minutes, don't keep process alive
+
 /**
  * 获取今天的日志目录（按workspace分目录）
  */
@@ -397,14 +412,60 @@ function readRecentLogs(workspace, limit = 50, offset = 0) {
  */
 function readLogEntry(date, workspace, logId) {
   const dir = path.join(LOGS_DIR, date, workspace);
-  const fname = `${logId}.json`;
-  const fpath = path.join(dir, fname);
-  if (!fs.existsSync(fpath)) return null;
+  // Files are saved as ${logId}-${type}.json, so glob for the pattern
   try {
-    return JSON.parse(fs.readFileSync(fpath, 'utf-8'));
+    if (!fs.existsSync(dir)) return null;
+    const files = fs.readdirSync(dir);
+    const match = files.find(f => f.startsWith(logId + '-') && f.endsWith('.json'));
+    if (!match) {
+      // Also try exact match (legacy format)
+      const exactPath = path.join(dir, `${logId}.json`);
+      if (fs.existsSync(exactPath)) {
+        return JSON.parse(fs.readFileSync(exactPath, 'utf-8'));
+      }
+      return null;
+    }
+    return JSON.parse(fs.readFileSync(path.join(dir, match), 'utf-8'));
   } catch (e) {
     return null;
   }
+}
+
+function getActiveRequestDetail(logId) {
+  const active = activeLogs.get(logId);
+  if (!active) return null;
+  const entry = active.entry;
+  const chunks = entry.response.chunks || [];
+  let queuePosition = 0;
+  for (let i = chunks.length - 1; i >= 0; i--) {
+    const c = chunks[i];
+    if (c.event === 'request_wait_in_queue') {
+      const data = c.data || {};
+      queuePosition = data.data?.position || data.position || 0;
+      break;
+    }
+  }
+  return {
+    id: entry.id,
+    workspace: entry.workspace,
+    timestamp: entry.timestamp,
+    type: entry.type,
+    request: {
+      url: entry.request.url,
+      method: entry.request.method,
+      body: entry.request.body
+    },
+    response: {
+      status: entry.response.status,
+      fullContent: entry.response.fullContent || '',
+      fullReasoning: entry.response.fullReasoning || '',
+      tokenUsage: entry.response.tokenUsage,
+      duration_ms: Date.now() - active.startTime,
+      chunkCount: chunks.length,
+      queuePosition
+    },
+    isActive: true
+  };
 }
 
 module.exports = {
@@ -418,6 +479,7 @@ module.exports = {
   finalizeLog,
   getActiveCount,
   getActiveRequests,
+  getActiveRequestDetail,
   getLogDirectories,
   readRecentLogs,
   readLogEntry,

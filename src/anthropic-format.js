@@ -1,5 +1,122 @@
 const { v4: uuidv4 } = require('./uuid');
 
+// Parse XML attribute-style toolcall: ToolName key="value" key2="value2"
+function parseXmlAttributeToolcall(inner) {
+  // Match: ToolName key="value" key2="value2" (last value may be missing closing quote)
+  const nameMatch = inner.match(/^(\w+)\s+/);
+  if (!nameMatch) return null;
+  const name = nameMatch[1];
+  const params = {};
+
+  // Match key="value" pairs (handle missing closing quote on last value)
+  const attrRegex = /(\w+)\s*=\s*"([^"]*?)"(?:\s|$)/g;
+  let m;
+  while ((m = attrRegex.exec(inner)) !== null) {
+    params[m[1]] = m[2];
+  }
+
+  // Also try key='value' with single quotes
+  const attrRegex2 = /(\w+)\s*=\s*'([^']*?)'(?:\s|$)/g;
+  while ((m = attrRegex2.exec(inner)) !== null) {
+    if (!params[m[1]]) params[m[1]] = m[2];
+  }
+
+  // Handle unclosed last quote: key="value without closing quote
+  const unclosedRegex = /(\w+)\s*=\s*"([^"]*)$/g;
+  while ((m = unclosedRegex.exec(inner)) !== null) {
+    if (!params[m[1]]) params[m[1]] = m[2];
+  }
+
+  if (Object.keys(params).length === 0) return null;
+  return { name, params };
+}
+
+// Parse XML arg_key/arg_value style toolcall
+// Format: ToolName key</arg_key><arg_value>value</arg_value>key2</arg_key><arg_value>value2</arg_value>
+// Also handles: ToolName <arg_key>key</arg_key><arg_value>value</arg_value>
+function parseXmlArgKeyToolcall(inner) {
+  const nameMatch = inner.match(/^(\w+)\s+/);
+  if (!nameMatch) return null;
+  const name = nameMatch[1];
+  const params = {};
+
+  // Pattern: key</arg_key><arg_value>value</arg_value> or <arg_key>key</arg_key><arg_value>value</arg_value>
+  const argRegex = /(?:<arg_key>)?(\w+)\s*<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/g;
+  let m;
+  while ((m = argRegex.exec(inner)) !== null) {
+    params[m[1]] = m[2].trim();
+  }
+
+  if (Object.keys(params).length === 0) return null;
+  return { name, params };
+}
+
+// Parse XML with name attribute: <toolcall name="ToolName">...</toolcall>
+function parseXmlNamedToolcall(inner) {
+  const nameMatch = inner.match(/<toolcall\s+name=["']([^"']+)["']/);
+  const name = nameMatch ? nameMatch[1] : '';
+  const params = {};
+  const paramRegex = /<param\s+name=["']([^"']+)["'](?:\s+string=["']([^"']*)["'])?>([\s\S]*?)<\/param>/g;
+  let pm;
+  while ((pm = paramRegex.exec(inner)) !== null) {
+    const pName = pm[1];
+    const pValue = pm[3].trim();
+    params[pName] = pValue;
+  }
+  if (!name && Object.keys(params).length === 0) return null;
+  return { name, params };
+}
+
+function parseToolcallContent(inner) {
+  const trimmed = inner.trim();
+
+  // 1. Try JSON first (the format we asked the model to use)
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    // Not JSON, try XML formats below
+  }
+
+  // 2. Try XML with name attribute: <toolcall name="...">
+  const namedResult = parseXmlNamedToolcall(inner);
+  if (namedResult) {
+    console.log(`[anthropic-format] Parsed XML-named toolcall: ${namedResult.name}`);
+    return namedResult;
+  }
+
+  // 3. Try XML arg_key/arg_value format: ToolName key</arg_key><arg_value>value</arg_value>
+  const argKeyResult = parseXmlArgKeyToolcall(inner);
+  if (argKeyResult) {
+    console.log(`[anthropic-format] Parsed XML arg_key toolcall: ${argKeyResult.name}`);
+    return argKeyResult;
+  }
+
+  // 4. Try XML attribute format: ToolName key="value" key2="value2"
+  const attrResult = parseXmlAttributeToolcall(inner);
+  if (attrResult) {
+    console.log(`[anthropic-format] Parsed XML-attribute toolcall: ${attrResult.name}`);
+    return attrResult;
+  }
+
+  // 5. Try fixing common JSON issues (trailing commas, single quotes)
+  if (trimmed.startsWith('{')) {
+    try {
+      const fixed = trimmed.replace(/,\s*([}\]])/g, '$1').replace(/'/g, '"');
+      return JSON.parse(fixed);
+    } catch (e2) {}
+  }
+
+  // 6. Try extracting JSON from mixed content
+  const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[0]);
+    } catch (e3) {}
+  }
+
+  throw new Error(`Could not parse toolcall content: ${trimmed.substring(0, 100)}`);
+}
+
 function createAnthropicMessage(id, model, content, stopReason, usage, thinking) {
   const contentBlocks = [];
 
@@ -229,7 +346,7 @@ function openAIToAnthropicMessages(messages) {
           id: tc.id,
           name: tc.function?.name || tc.name,
           input: typeof tc.function?.arguments === 'string' ?
-            JSON.parse(tc.function.arguments) : (tc.input || {})
+            (function(){ try { return JSON.parse(tc.function.arguments); } catch(e) { return { _raw: tc.function.arguments }; } })() : (tc.input || {})
         });
       }
       anthropicMessages.push({ role: 'assistant', content });
@@ -296,7 +413,7 @@ function openAIResponseToAnthropic(response, model) {
         id: tc.id,
         name: tc.function?.name || tc.name,
         input: typeof tc.function?.arguments === 'string' ?
-          JSON.parse(tc.function.arguments) : (tc.input || {})
+          (function(){ try { return JSON.parse(tc.function.arguments); } catch(e) { return { _raw: tc.function.arguments }; } })() : (tc.input || {})
       });
     }
     stopReason = 'tool_use';
@@ -437,9 +554,9 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       outputTokenCount: 0,
       hasToolUse: false,
       toolCallIndex: {},  // maps tool call index to {id, name, input}
-      // Tool call streaming detection
-      toolCallBuffer: '',     // buffer for detecting <toolcall> tags in text stream
-      inToolCall: false,      // currently inside a <toolcall> tag
+      // Tool call streaming detection (supports both <toolcall> and <tool_call> tag formats)
+      toolCallBuffer: '',     // buffer for detecting <toolcall>/<tool_call> tags in text stream
+      inToolCall: false,      // currently inside a <toolcall>/<tool_call> tag
       pendingToolCalls: [],   // extracted tool calls waiting to be emitted
       suppressStopEvents: true, // always suppress - outer loop controls when to emit stop events
       stopReason: null,       // last stop reason from done event
@@ -489,12 +606,12 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
     state.outputTokenCount += Math.ceil(chunk.reasoning.length / 4);
   }
 
-  // Handle text content - with <toolcall> tag detection and filtering
+  // Handle text content - with <toolcall>/<tool_call> tag detection and filtering
   if (chunk.type === 'text' && chunk.content) {
     state.textContent += chunk.content;
     state.outputTokenCount += Math.ceil(chunk.content.length / 4);
 
-    // Process text through <toolcall> tag detector
+    // Process text through <toolcall>/<tool_call> tag detector
     let textToEmit = '';
     const content = chunk.content;
 
@@ -502,14 +619,21 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       const ch = content[i];
 
       if (state.inToolCall) {
-        // Inside a <toolcall> tag - buffer until </toolcall>
+        // Inside a <toolcall>/<tool_call> tag - buffer until closing tag
         state.toolCallBuffer += ch;
-        // Check if buffer ends with </toolcall>
+
+        // Check if buffer ends with </toolcall> or </tool_call>
+        let closingTag = null;
         if (state.toolCallBuffer.endsWith('</toolcall>')) {
+          closingTag = '</toolcall>';
+        } else if (state.toolCallBuffer.endsWith('</tool_call>')) {
+          closingTag = '</tool_call>';
+        }
+        if (closingTag) {
           // Extract the tool call JSON
-          const inner = state.toolCallBuffer.slice(0, -'</toolcall>'.length);
+          const inner = state.toolCallBuffer.slice(0, -closingTag.length);
           try {
-            const toolData = JSON.parse(inner.trim());
+            const toolData = parseToolcallContent(inner);
             state.pendingToolCalls.push({
               name: toolData.name || toolData.function?.name || '',
               input: toolData.params || toolData.arguments || toolData.input || {}
@@ -521,43 +645,48 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
           state.toolCallBuffer = '';
         }
       } else {
-        // Not inside a toolcall - check for <toolcall> start
+        // Not inside a toolcall - check for <toolcall>/<tool_call> start
         state.toolCallBuffer += ch;
 
-        // Check if buffer might be starting a <toolcall> tag
+        // Check if buffer might be starting a <toolcall> or <tool_call> tag
         if (ch === '>') {
-          if (state.toolCallBuffer.endsWith('<toolcall>')) {
-            // Found <toolcall> start - switch to tool call mode
+          if (state.toolCallBuffer.endsWith('<toolcall>') || state.toolCallBuffer.match(/<toolcall\s+[^>]*>$/) ||
+              state.toolCallBuffer.endsWith('<tool_call>') || state.toolCallBuffer.match(/<tool_call\s+[^>]*>$/)) {
+            // Found <toolcall>/<tool_call> start - switch to tool call mode
             state.inToolCall = true;
-            // Emit any text before the <toolcall> tag
-            const beforeTag = state.toolCallBuffer.slice(0, -'<toolcall>'.length);
-            textToEmit += beforeTag;
-            state.toolCallBuffer = '';
+            // Emit any text before the tag
+            const beforeTag = state.toolCallBuffer.match(/^(.*?)(<(?:tool_call|toolcall)(?:\s[^>]*)?>)$/);
+            if (beforeTag) {
+              textToEmit += beforeTag[1];
+              state.toolCallBuffer = '';
+            }
             continue;
           }
         }
 
-        // If buffer is getting long and doesn't match <toolcall>, flush it
-        // <toolcall> is 10 chars, so we only need to buffer up to that length
-        if (state.toolCallBuffer.length > 10) {
-          // Check if buffer could still form <toolcall>
+        // If buffer is getting long and doesn't match <toolcall>/<tool_call>, flush it
+        if (state.toolCallBuffer.length > 100) {
           const buf = state.toolCallBuffer;
-          const couldBeToolcall = '<toolcall>'.startsWith(buf) || buf.includes('<');
+          const couldBeToolcall = '<toolcall>'.startsWith(buf) || '<toolcall '.startsWith(buf) ||
+            '<tool_call>'.startsWith(buf) || '<tool_call '.startsWith(buf) ||
+            (buf.includes('<') && buf.lastIndexOf('<') > buf.length - 12);
           if (!couldBeToolcall) {
-            // No chance of forming <toolcall>, flush the buffer
             textToEmit += buf;
             state.toolCallBuffer = '';
-          } else if (buf.includes('<') && !'<toolcall>'.startsWith(buf.slice(buf.lastIndexOf('<')))) {
-            // Has '<' but it can't form <toolcall>, flush up to and including '<'
+          } else if (buf.includes('<')) {
             const ltIndex = buf.lastIndexOf('<');
-            textToEmit += buf.slice(0, ltIndex + 1);
-            state.toolCallBuffer = buf.slice(ltIndex + 1);
+            const afterLt = buf.slice(ltIndex);
+            if (!'<toolcall>'.startsWith(afterLt) && !'<toolcall '.startsWith(afterLt) &&
+                !'<tool_call>'.startsWith(afterLt) && !'<tool_call '.startsWith(afterLt)) {
+              textToEmit += buf.slice(0, ltIndex + 1);
+              state.toolCallBuffer = buf.slice(ltIndex + 1);
+            }
           }
         }
       }
     }
 
-    // Emit filtered text (text without <toolcall> tags)
+    // Emit filtered text (text without <toolcall>/<tool_call> tags)
     if (textToEmit) {
       if (state.currentContentType !== 'text') {
         // Close previous content block if any
@@ -650,7 +779,7 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
     // Flush toolCallBuffer
     if (state.toolCallBuffer) {
       if (state.inToolCall) {
-        // <toolcall> was opened but </toolcall> never arrived (e.g. max_tokens truncation)
+        // <toolcall>/<tool_call> was opened but closing tag never arrived (e.g. max_tokens truncation)
         // Try to extract tool call from the incomplete buffer
         const bufferContent = state.toolCallBuffer.trim();
         try {
@@ -708,17 +837,17 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       }
     }
 
-    // Fallback: check for <toolcall> tags in accumulated textContent
+    // Fallback: check for <toolcall>/<tool_call> tags in accumulated textContent
     // (in case the streaming detector missed some due to chunk boundaries)
-    // Support both closed and unclosed tags
+    // Support both closed and unclosed tags, and both <toolcall> and <tool_call> formats
     const extractedToolCalls = [];
 
-    // Strict match: <toolcall>...</toolcall>
-    const strictRegex = /<toolcall>\s*([\s\S]*?)\s*<\/toolcall>/g;
+    // Strict match: <toolcall>...</toolcall> or <tool_call>...</tool_call>
+    const strictRegex = /<tool_?call>\s*([\s\S]*?)\s*<\/tool_?call>/g;
     let match;
     while ((match = strictRegex.exec(state.textContent)) !== null) {
       try {
-        const toolData = JSON.parse(match[1]);
+        const toolData = parseToolcallContent(match[1]);
         const tc = {
           name: toolData.name || toolData.function?.name || '',
           input: toolData.params || toolData.arguments || toolData.input || {}
@@ -734,13 +863,13 @@ function llmUtilsChunkToAnthropic(chunk, messageId, model, state, toolMap) {
       }
     }
 
-    // Loose match: <toolcall>... without closing tag (handles truncation)
-    const looseRegex = /<toolcall>\s*([\s\S]*?)(?:<\/toolcall>|$)/g;
+    // Loose match: <toolcall>... or <tool_call>... without closing tag (handles truncation)
+    const looseRegex = /<tool_?call>\s*([\s\S]*?)(?:<\/tool_?call>|$)/g;
     while ((match = looseRegex.exec(state.textContent)) !== null) {
       try {
         const raw = match[1].trim();
         if (!raw) continue;
-        const toolData = JSON.parse(raw);
+        const toolData = parseToolcallContent(raw);
         const tc = {
           name: toolData.name || toolData.function?.name || '',
           input: toolData.params || toolData.arguments || toolData.input || {}
@@ -884,5 +1013,9 @@ module.exports = {
   anthropicToOpenAITools,
   openAIResponseToAnthropic,
   openAIStreamToAnthropic,
-  llmUtilsChunkToAnthropic
+  llmUtilsChunkToAnthropic,
+  parseXmlNamedToolcall,
+  parseXmlAttributeToolcall,
+  parseXmlArgKeyToolcall,
+  parseToolcallContent
 };

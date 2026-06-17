@@ -190,6 +190,7 @@ tr:hover td { background: var(--table-hover); }
 }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 /* No data */
 .empty { text-align: center; padding: 40px; color: var(--text-dim); font-size: 14px; }
@@ -343,6 +344,53 @@ tr:hover td { background: var(--table-hover); }
   font-size: 11px; color: var(--text-dim); margin-top: 2px;
 }
 
+/* Model Config */
+.mc-category-section { margin-bottom: 20px; }
+.mc-category-header {
+  font-size: 14px; font-weight: 600; color: var(--accent);
+  padding: 8px 12px; background: var(--accent-bg); border-radius: 6px;
+  margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+}
+.mc-category-count {
+  font-size: 11px; background: var(--btn-bg); color: var(--text-muted);
+  padding: 1px 8px; border-radius: 10px; font-weight: 500;
+}
+.mc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.mc-table th {
+  text-align: left; padding: 8px 12px; color: var(--text-muted);
+  font-weight: 500; border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.mc-table td {
+  padding: 8px 12px; border-bottom: 1px solid var(--border-light); color: var(--text);
+}
+.mc-table tr:hover td { background: var(--table-hover); }
+.mc-key-cell {
+  font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 12px;
+  color: var(--accent); font-weight: 500;
+}
+.mc-toolcall-yes { color: var(--green); }
+.mc-toolcall-no { color: var(--red); }
+.mc-toolcall-null { color: var(--text-dim); }
+.mc-action-btn {
+  background: var(--btn-bg); border: 1px solid var(--border); color: var(--text);
+  padding: 3px 10px; border-radius: 4px; font-size: 11px; cursor: pointer;
+  transition: background 0.2s; margin-right: 4px;
+}
+.mc-action-btn:hover { background: var(--btn-hover-bg); }
+.mc-action-btn.mc-del:hover { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+.mc-form-grid { display: grid; gap: 14px; }
+.mc-form-label {
+  display: block; font-size: 13px; color: var(--text-muted); font-weight: 500;
+}
+.mc-form-input {
+  display: block; width: 100%; margin-top: 4px;
+  background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
+  padding: 8px 12px; border-radius: 6px; font-size: 13px; outline: none;
+  transition: border-color 0.2s;
+}
+.mc-form-input:focus { border-color: var(--accent); }
+.mc-form-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* Responsive */
 @media (max-width: 800px) {
   .stats-row { grid-template-columns: repeat(2, 1fr); }
@@ -364,6 +412,7 @@ tr:hover td { background: var(--table-hover); }
     <span id="clock" style="color:var(--text-muted);font-size:13px"></span>
     <button class="theme-btn" onclick="toggleTheme()" id="themeToggle" title="Toggle theme">&#9728;&#65039;</button>
     <button class="theme-btn" onclick="openFallbackSettings()" title="Model Fallback Settings">&#9881;&#65039;</button>
+    <button class="theme-btn" onclick="openModelConfig()" title="Model Config">&#128295;</button>
     <a href="/?key=" id="apiInfoLink">API Info</a>
     <a href="https://github.com/ZedeX/trae-local-api" target="_blank">GitHub</a>
   </div>
@@ -541,10 +590,66 @@ tr:hover td { background: var(--table-hover); }
   </div>
 </div>
 
+<!-- Model Config Modal -->
+<div class="modal-overlay" id="modelConfigModal" onclick="if(event.target===this)closeModelConfig()">
+  <div class="modal-content" style="max-width:1060px">
+    <div class="modal-header">
+      <h2>&#128295; Model Configuration</h2>
+      <button class="modal-close" onclick="closeModelConfig()">&times;</button>
+    </div>
+    <div class="modal-body" style="max-height:70vh;overflow-y:auto;padding:20px">
+      <div id="mcCategoryContainer"></div>
+      <div style="display:flex;gap:12px;margin-top:20px;justify-content:space-between;align-items:center;flex-wrap:wrap">
+        <button class="fb-btn fb-btn-primary" onclick="mcShowAddForm()">&#43; 添加模型</button>
+        <div style="display:flex;gap:12px;align-items:center">
+          <button class="fb-btn fb-btn-secondary" onclick="loadModelConfigUI()">Reset</button>
+          <button class="fb-btn fb-btn-primary" onclick="saveModelConfigUI()">Save All</button>
+        </div>
+      </div>
+      <div id="mcSaveStatus" style="text-align:right;font-size:12px;margin-top:8px;min-height:18px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Model Config Add/Edit Inline Form Modal -->
+<div class="modal-overlay" id="mcFormModal" onclick="if(event.target===this)mcCloseForm()">
+  <div class="modal-content" style="max-width:560px">
+    <div class="modal-header">
+      <h2 id="mcFormTitle">&#43; 添加模型</h2>
+      <button class="modal-close" onclick="mcCloseForm()">&times;</button>
+    </div>
+    <div class="modal-body" style="padding:20px">
+      <div class="mc-form-grid">
+        <label class="mc-form-label">模型名 (key)<span style="color:var(--red)">*</span>
+          <input type="text" id="mcFormKey" class="mc-form-input" placeholder="e.g. claude-sonnet-4-5">
+        </label>
+        <label class="mc-form-label">config_name
+          <input type="text" id="mcFormConfigName" class="mc-form-input" placeholder="e.g. Claude Sonnet 4.5">
+        </label>
+        <label class="mc-form-label">function
+          <input type="text" id="mcFormFunction" class="mc-form-input" placeholder="e.g. chatCompletion">
+        </label>
+        <label class="mc-form-label">category
+          <input type="text" id="mcFormCategory" class="mc-form-input" placeholder="e.g. claude">
+        </label>
+        <label class="mc-form-label">toolcall_compatible
+          <select id="mcFormToolcall" class="mc-form-input">
+            <option value="true">true ✅</option>
+            <option value="false">false ❌</option>
+            <option value="null">null ❓</option>
+          </select>
+        </label>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:20px;justify-content:flex-end">
+        <button class="fb-btn fb-btn-secondary" onclick="mcCloseForm()">Cancel</button>
+        <button class="fb-btn fb-btn-primary" id="mcFormSubmitBtn" onclick="mcSubmitForm()">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const API = window.location.origin;
-const AUTO_REFRESH_MS = 3000;
-let autoRefreshId = null;
 let autoRefreshOn = true;
 let tokenChart = null;
 let modelChart = null;
@@ -685,7 +790,7 @@ async function refreshSessions() {
         queueHtml = `<span class="queue-badge">已排队 ${formatDuration(r.queueTiming)}</span>`;
       }
       return `
-      <div class="active-item">
+      <div class="active-item" style="cursor:pointer" onclick="viewActiveLog('${r.id}')" title="Click for live details">
         <span><span class="spinner" style="display:inline-block;vertical-align:middle;margin-right:8px"></span>${r.id}</span>
         <span style="color:var(--text-muted)">${r.workspace || 'default'}</span>
         <span style="color:var(--text-muted)">${r.type}</span>
@@ -849,6 +954,69 @@ async function refreshStats() {
 
 // ===== Modal =====
 let activeModalTab = 'overview';
+let currentModalIsLive = false;
+let currentModalLogId = null;
+let liveModalTimer = null;
+
+function startLiveModalPoll() {
+  stopLiveModalPoll();
+  liveModalTimer = setInterval(async () => {
+    if (!currentModalLogId || !currentModalIsLive) { stopLiveModalPoll(); return; }
+    const data = await apiCall(`/v1/dashboard/active/${currentModalLogId}`);
+    if (!data || !data.isActive) {
+      currentModalIsLive = false;
+      stopLiveModalPoll();
+      const overviewEl = document.getElementById('tab-overview');
+      if (overviewEl) {
+        const liveBadge = overviewEl.querySelector('.live-badge');
+        if (liveBadge) liveBadge.outerHTML = '<span class="badge green" style="font-size:11px">Completed</span>';
+      }
+      return;
+    }
+    currentModalData = data;
+    updateLiveModalContent(data);
+  }, 1500);
+}
+
+function stopLiveModalPoll() {
+  if (liveModalTimer) { clearInterval(liveModalTimer); liveModalTimer = null; }
+}
+
+function updateLiveModalContent(data) {
+  const resp = data.response || {};
+  const overviewEl = document.getElementById('tab-overview');
+  if (overviewEl && activeModalTab === 'overview') {
+    const durationEl = overviewEl.querySelector('[data-field="duration"]');
+    if (durationEl) durationEl.textContent = formatDuration(resp.duration_ms);
+    const contentLenEl = overviewEl.querySelector('[data-field="contentLen"]');
+    if (contentLenEl) contentLenEl.textContent = (resp.fullContent || '').length.toLocaleString() + ' chars';
+    const chunksEl = overviewEl.querySelector('[data-field="chunks"]');
+    if (chunksEl) chunksEl.textContent = (resp.chunkCount || 0).toLocaleString();
+    const queueEl = overviewEl.querySelector('[data-field="queue"]');
+    if (queueEl) queueEl.textContent = resp.queuePosition > 0 ? `#${resp.queuePosition}` : '-';
+  }
+  const responseEl = document.getElementById('tab-response');
+  if (responseEl && activeModalTab === 'response') {
+    const contentPre = responseEl.querySelector('[data-field="liveContent"]');
+    if (contentPre) {
+      const newContent = (resp.fullContent || '(empty)').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (contentPre.getAttribute('data-len') !== String((resp.fullContent || '').length)) {
+        contentPre.innerHTML = newContent.substring(0, 50000);
+        contentPre.setAttribute('data-len', String((resp.fullContent || '').length));
+        contentPre.scrollTop = contentPre.scrollHeight;
+      }
+    }
+    const reasoningPre = responseEl.querySelector('[data-field="liveReasoning"]');
+    if (reasoningPre && resp.fullReasoning) {
+      const newReasoning = resp.fullReasoning.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      if (reasoningPre.getAttribute('data-len') !== String(resp.fullReasoning.length)) {
+        reasoningPre.innerHTML = newReasoning.substring(0, 10000);
+        reasoningPre.setAttribute('data-len', String(resp.fullReasoning.length));
+        reasoningPre.scrollTop = reasoningPre.scrollHeight;
+      }
+    }
+  }
+}
 
 function switchModalTab(tab) {
   activeModalTab = tab;
@@ -860,23 +1028,56 @@ function switchModalTab(tab) {
 
 async function viewLog(date, workspace, id, type) {
   const modal = document.getElementById('modal');
-  document.getElementById('modalTitle').textContent = `Request Details`;
   document.getElementById('modalIdBadge').textContent = id;
   
-  // Reset tabs
   switchModalTab('overview');
   document.querySelectorAll('.modal-tab-content').forEach(c => c.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px">Loading...</p>');
   
   modal.classList.add('show');
   document.body.style.overflow = 'hidden';
 
-  const data = await apiCall(`/v1/dashboard/log/${date}/${workspace}/${id}-${type}`);
-  if (!data) {
-    document.getElementById('tab-overview').innerHTML = '<p style="color:var(--red);text-align:center;padding:40px">Failed to load log</p>';
-    return;
+  const activeData = await apiCall(`/v1/dashboard/active/${id}`);
+  if (activeData && activeData.isActive) {
+    currentModalData = activeData;
+    currentModalIsLive = true;
+    currentModalLogId = id;
+    populateModal(activeData);
+    startLiveModalPoll();
+  } else {
+    currentModalIsLive = false;
+    currentModalLogId = null;
+    const data = await apiCall(`/v1/dashboard/log/${date}/${workspace}/${id}-${type}`);
+    if (!data) {
+      document.getElementById('tab-overview').innerHTML = '<p style="color:var(--red);text-align:center;padding:40px">Failed to load log</p>';
+      return;
+    }
+    currentModalData = data;
+    populateModal(data);
   }
-  currentModalData = data;
-  populateModal(data);
+}
+
+async function viewActiveLog(id) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modalIdBadge').textContent = id;
+  
+  switchModalTab('overview');
+  document.querySelectorAll('.modal-tab-content').forEach(c => c.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:40px">Loading...</p>');
+  
+  modal.classList.add('show');
+  document.body.style.overflow = 'hidden';
+
+  const activeData = await apiCall(`/v1/dashboard/active/${id}`);
+  if (activeData && activeData.isActive) {
+    currentModalData = activeData;
+    currentModalIsLive = true;
+    currentModalLogId = id;
+    populateModal(activeData);
+    startLiveModalPoll();
+  } else {
+    currentModalIsLive = false;
+    currentModalLogId = null;
+    document.getElementById('tab-overview').innerHTML = '<p style="color:var(--text-dim);text-align:center;padding:40px">Request completed or not found</p>';
+  }
 }
 
 function populateModal(data) {
@@ -884,8 +1085,8 @@ function populateModal(data) {
   const resp = data.response || {};
   const body = req.body || {};
   const tu = resp.tokenUsage || {};
+  const isLive = data.isActive === true;
 
-  // Extract token values (handle nested structures)
   function getToken(tu, key) {
     if (!tu || typeof tu !== 'object') return 0;
     if (typeof tu[key] === 'number') return tu[key];
@@ -900,8 +1101,10 @@ function populateModal(data) {
   const totalTks = getToken(tu, 'total_tokens');
   const calcTotal = promptTks + completionTks;
 
-  // Overview tab
+  const liveBadge = isLive ? '<span class="live-badge" style="display:inline-flex;align-items:center;gap:4px;background:var(--red);color:#fff;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;margin-bottom:12px"><span style="width:6px;height:6px;border-radius:50%;background:#fff;animation:livePulse 1s infinite"></span> LIVE STREAMING</span>' : '';
+
   document.getElementById('tab-overview').innerHTML = `
+    ${liveBadge}
     <div class="modal-grid">
       <div class="modal-field">
         <div class="f-label">Request ID</div>
@@ -925,19 +1128,23 @@ function populateModal(data) {
       </div>
       <div class="modal-field">
         <div class="f-label">Status</div>
-        <div class="f-value" style="color:${resp.status >= 200 && resp.status < 300 ? 'var(--green)' : 'var(--red)'}">${resp.status || '-'}</div>
+        <div class="f-value" style="color:${resp.status >= 200 && resp.status < 300 ? 'var(--green)' : 'var(--red)'}">${resp.status || (isLive ? 'Streaming...' : '-')}</div>
       </div>
       <div class="modal-field">
         <div class="f-label">Duration</div>
-        <div class="f-value">${formatDuration(resp.duration_ms)}</div>
+        <div class="f-value" data-field="duration">${formatDuration(resp.duration_ms)}</div>
       </div>
       <div class="modal-field">
         <div class="f-label">Content Length</div>
-        <div class="f-value">${(resp.fullContent || '').length.toLocaleString()} chars</div>
+        <div class="f-value" data-field="contentLen">${(resp.fullContent || '').length.toLocaleString()} chars</div>
       </div>
       <div class="modal-field">
         <div class="f-label">SSE Chunks</div>
-        <div class="f-value">${(resp.chunks || []).length.toLocaleString()}</div>
+        <div class="f-value" data-field="chunks">${(resp.chunkCount || (resp.chunks || []).length).toLocaleString()}</div>
+      </div>
+      <div class="modal-field">
+        <div class="f-label">Queue Position</div>
+        <div class="f-value" data-field="queue">${resp.queuePosition > 0 ? '#' + resp.queuePosition : '-'}</div>
       </div>
       <div class="modal-field">
         <div class="f-label">Request URL</div>
@@ -959,7 +1166,6 @@ function populateModal(data) {
     </div>
   `;
 
-  // Request tab
   const messagesPreview = (body.messages || []).map(m => ({
     role: m.role,
     content: typeof m.content === 'string' ? (m.content.length > 300 ? m.content.substring(0, 300) + '...' : m.content) : '[complex content]'
@@ -989,24 +1195,23 @@ function populateModal(data) {
     <pre>${JSON.stringify(req.headers || {}, null, 2).replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>
   `;
 
-  // Response tab
   document.getElementById('tab-response').innerHTML = `
     <div class="modal-grid" style="margin-bottom:16px">
       <div class="modal-field">
         <div class="f-label">Status</div>
-        <div class="f-value" style="color:${resp.status >= 200 && resp.status < 300 ? 'var(--green)' : 'var(--red)'}">${resp.status || '-'}</div>
+        <div class="f-value" style="color:${resp.status >= 200 && resp.status < 300 ? 'var(--green)' : 'var(--red)'}">${resp.status || (isLive ? 'Streaming...' : '-')}</div>
       </div>
       <div class="modal-field">
         <div class="f-label">Duration</div>
-        <div class="f-value">${formatDuration(resp.duration_ms)}</div>
+        <div class="f-value" data-field="duration">${formatDuration(resp.duration_ms)}</div>
       </div>
       <div class="modal-field">
         <div class="f-label">Content Length</div>
-        <div class="f-value">${(resp.fullContent || '').length.toLocaleString()}</div>
+        <div class="f-value" data-field="contentLen">${(resp.fullContent || '').length.toLocaleString()}</div>
       </div>
       <div class="modal-field">
         <div class="f-label">SSE Chunks</div>
-        <div class="f-value">${(resp.chunks || []).length.toLocaleString()}</div>
+        <div class="f-value" data-field="chunks">${(resp.chunkCount || (resp.chunks || []).length).toLocaleString()}</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -1014,14 +1219,12 @@ function populateModal(data) {
       <span class="token-badge out">Output: ${formatTokens(completionTks)}</span>
       <span class="token-badge total">Total: ${formatTokens(totalTks || calcTotal)}</span>
     </div>
-    ${resp.fullReasoning ? `<div class="section-title">Reasoning</div><pre>${resp.fullReasoning.replace(/</g,'&lt;').replace(/>/g,'&gt;').substring(0, 5000)}</pre>` : ''}
+    ${resp.fullReasoning ? `<div class="section-title">Reasoning</div><pre data-field="liveReasoning" data-len="${resp.fullReasoning.length}">${resp.fullReasoning.replace(/</g,'&lt;').replace(/>/g,'&gt;').substring(0, 10000)}</pre>` : ''}
     <div class="section-title">Full Content</div>
-    <pre>${(resp.fullContent || '(empty)').replace(/</g,'&lt;').replace(/>/g,'&gt;').substring(0, 10000)}</pre>
+    <pre data-field="liveContent" data-len="${(resp.fullContent || '').length}">${(resp.fullContent || '(empty)').replace(/</g,'&lt;').replace(/>/g,'&gt;').substring(0, 50000)}</pre>
   `;
 
-  // Raw JSON tab
   const sanitized = JSON.stringify(data, (key, value) => {
-    // Truncate very long string values for readability
     if (typeof value === 'string' && value.length > 2000) return value.substring(0, 2000) + '...[TRUNCATED]';
     return value;
   }, 2);
@@ -1032,6 +1235,9 @@ function closeModal() {
   document.getElementById('modal').classList.remove('show');
   document.body.style.overflow = '';
   currentModalData = null;
+  currentModalIsLive = false;
+  currentModalLogId = null;
+  stopLiveModalPoll();
 }
 
 // Clock
@@ -1041,21 +1247,34 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// Auto refresh cycle
-async function autoRefreshCycle() {
-  if (autoRefreshOn) await refreshAll();
-  autoRefreshId = setTimeout(autoRefreshCycle, AUTO_REFRESH_MS);
+let uptimeTimer = null;
+let activeTimer = null;
+let tableTimer = null;
+let statsTimer = null;
+
+function startSmartRefresh() {
+  stopSmartRefresh();
+  refreshAll();
+  uptimeTimer = setInterval(() => { if (autoRefreshOn) refreshStatus(); }, 1000);
+  activeTimer = setInterval(() => { if (autoRefreshOn) refreshSessions(); }, 2000);
+  tableTimer = setInterval(() => { if (autoRefreshOn) refreshRequests(); }, 5000);
+  statsTimer = setInterval(() => { if (autoRefreshOn) refreshStats(); }, 10000);
 }
 
-// Init
-refreshAll();
-autoRefreshCycle();
+function stopSmartRefresh() {
+  [uptimeTimer, activeTimer, tableTimer, statsTimer].forEach(t => { if (t) clearInterval(t); });
+  uptimeTimer = activeTimer = tableTimer = statsTimer = null;
+}
+
+startSmartRefresh();
 
 // Keyboard shortcuts
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closeModal();
     closeFallbackSettings();
+    mcCloseForm();
+    closeModelConfig();
   }
 });
 
@@ -1240,6 +1459,227 @@ async function saveFallbackConfigUI() {
       statusEl.textContent = 'Saved successfully!';
       statusEl.style.color = 'var(--green)';
       fbConfig = result.config || config;
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } else {
+      statusEl.textContent = 'Error: ' + (result.error || 'Unknown error');
+      statusEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+// ===== Model Config =====
+let mcConfig = null;
+let mcEditingKey = null;
+
+function openModelConfig() {
+  document.getElementById('modelConfigModal').classList.add('show');
+  document.body.style.overflow = 'hidden';
+  loadModelConfigUI();
+}
+
+function closeModelConfig() {
+  document.getElementById('modelConfigModal').classList.remove('show');
+  document.body.style.overflow = '';
+}
+
+async function loadModelConfigUI() {
+  const data = await apiCall('/v1/dashboard/model-config');
+  if (!data) {
+    mcConfig = { models: {} };
+  } else {
+    mcConfig = data;
+  }
+  if (!mcConfig.models) mcConfig.models = {};
+  renderModelConfig(mcConfig.models);
+  document.getElementById('mcSaveStatus').textContent = '';
+}
+
+function renderModelConfig(models) {
+  const container = document.getElementById('mcCategoryContainer');
+  const categories = {};
+  for (const [key, cfg] of Object.entries(models)) {
+    const cat = cfg.category || 'uncategorized';
+    if (!categories[cat]) categories[cat] = [];
+    categories[cat].push({ key, ...cfg });
+  }
+
+  const sortedCats = Object.keys(categories).sort();
+  if (sortedCats.length === 0) {
+    container.innerHTML = '<div class="empty">暂无模型配置数据</div>';
+    return;
+  }
+
+  let html = '';
+  for (const cat of sortedCats) {
+    const items = categories[cat];
+    html += `<div class="mc-category-section">`;
+    html += `<div class="mc-category-header">&#128193; ${escHtml(cat)} <span class="mc-category-count">${items.length}</span></div>`;
+    html += `<table class="mc-table"><thead><tr>
+      <th>Model Key</th><th>config_name</th><th>function</th><th>toolcall_compatible</th><th style="width:120px">Actions</th>
+    </tr></thead><tbody>`;
+
+    for (const item of items) {
+      const tc = item.toolcall_compatible;
+      let tcHtml = '';
+      if (tc === true) tcHtml = '<span class="mc-toolcall-yes">✅ true</span>';
+      else if (tc === false) tcHtml = '<span class="mc-toolcall-no">❌ false</span>';
+      else tcHtml = '<span class="mc-toolcall-null">❓ null</span>';
+
+      html += `<tr>
+        <td class="mc-key-cell">${escHtml(item.key)}</td>
+        <td>${escHtml(item.config_name || '-')}</td>
+        <td>${escHtml(item.function || '-')}</td>
+        <td>${tcHtml}</td>
+        <td>
+          <button class="mc-action-btn" onclick="mcShowEditForm('${escAttr(item.key)}')">Edit</button>
+          <button class="mc-action-btn mc-del" onclick="mcDeleteModel('${escAttr(item.key)}')">Del</button>
+        </td>
+      </tr>`;
+    }
+
+    html += `</tbody></table></div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(s) {
+  return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"');
+}
+
+function mcShowAddForm() {
+  mcEditingKey = null;
+  document.getElementById('mcFormTitle').innerHTML = '&#43; 添加模型';
+  document.getElementById('mcFormSubmitBtn').textContent = 'Add';
+  document.getElementById('mcFormKey').value = '';
+  document.getElementById('mcFormKey').disabled = false;
+  document.getElementById('mcFormConfigName').value = '';
+  document.getElementById('mcFormFunction').value = '';
+  document.getElementById('mcFormCategory').value = '';
+  document.getElementById('mcFormToolcall').value = 'null';
+  document.getElementById('mcFormModal').classList.add('show');
+}
+
+function mcShowEditForm(key) {
+  if (!mcConfig || !mcConfig.models[key]) return;
+  mcEditingKey = key;
+  const cfg = mcConfig.models[key];
+  document.getElementById('mcFormTitle').innerHTML = '&#9998; 编辑模型';
+  document.getElementById('mcFormSubmitBtn').textContent = 'Update';
+  document.getElementById('mcFormKey').value = key;
+  document.getElementById('mcFormKey').disabled = true;
+  document.getElementById('mcFormConfigName').value = cfg.config_name || '';
+  document.getElementById('mcFormFunction').value = cfg.function || '';
+  document.getElementById('mcFormCategory').value = cfg.category || '';
+  const tc = cfg.toolcall_compatible;
+  if (tc === true) document.getElementById('mcFormToolcall').value = 'true';
+  else if (tc === false) document.getElementById('mcFormToolcall').value = 'false';
+  else document.getElementById('mcFormToolcall').value = 'null';
+  document.getElementById('mcFormModal').classList.add('show');
+}
+
+function mcCloseForm() {
+  document.getElementById('mcFormModal').classList.remove('show');
+  mcEditingKey = null;
+}
+
+async function mcSubmitForm() {
+  const key = document.getElementById('mcFormKey').value.trim();
+  if (!key) { alert('模型名不能为空'); return; }
+
+  const configName = document.getElementById('mcFormConfigName').value.trim();
+  const fn = document.getElementById('mcFormFunction').value.trim();
+  const category = document.getElementById('mcFormCategory').value.trim();
+  const tcVal = document.getElementById('mcFormToolcall').value;
+  const toolcallCompatible = tcVal === 'true' ? true : tcVal === 'false' ? false : null;
+
+  const modelData = { config_name: configName, function: fn, category: category, toolcall_compatible: toolcallCompatible };
+
+  const isEdit = mcEditingKey !== null;
+  const statusEl = document.getElementById('mcSaveStatus');
+  statusEl.textContent = isEdit ? 'Updating...' : 'Adding...';
+  statusEl.style.color = 'var(--yellow)';
+
+  try {
+    const sep = '/v1/dashboard/model-config/models'.includes('?') ? '&' : '?';
+    const url = `${API}/v1/dashboard/model-config/models${sep}key=${encodeURIComponent(apiKey)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, ...modelData })
+    });
+    const result = await r.json();
+    if (r.ok && result.ok) {
+      statusEl.textContent = isEdit ? 'Updated!' : 'Added!';
+      statusEl.style.color = 'var(--green)';
+      mcCloseForm();
+      await loadModelConfigUI();
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } else {
+      statusEl.textContent = 'Error: ' + (result.error || 'Unknown error');
+      statusEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+async function mcDeleteModel(key) {
+  if (!confirm(`确定删除模型 "${key}" 吗？`)) return;
+
+  const statusEl = document.getElementById('mcSaveStatus');
+  statusEl.textContent = 'Deleting...';
+  statusEl.style.color = 'var(--yellow)';
+
+  try {
+    const sep = `/v1/dashboard/model-config/models/${encodeURIComponent(key)}`.includes('?') ? '&' : '?';
+    const url = `${API}/v1/dashboard/model-config/models/${encodeURIComponent(key)}${sep}key=${encodeURIComponent(apiKey)}`;
+    const r = await fetch(url, { method: 'DELETE' });
+    const result = await r.json();
+    if (r.ok && result.ok) {
+      statusEl.textContent = 'Deleted!';
+      statusEl.style.color = 'var(--green)';
+      await loadModelConfigUI();
+      setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    } else {
+      statusEl.textContent = 'Error: ' + (result.error || 'Unknown error');
+      statusEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+    statusEl.style.color = 'var(--red)';
+  }
+}
+
+async function saveModelConfigUI() {
+  if (!mcConfig) return;
+
+  const statusEl = document.getElementById('mcSaveStatus');
+  statusEl.textContent = 'Saving all...';
+  statusEl.style.color = 'var(--yellow)';
+
+  try {
+    const sep = '/v1/dashboard/model-config'.includes('?') ? '&' : '?';
+    const url = `${API}/v1/dashboard/model-config${sep}key=${encodeURIComponent(apiKey)}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(mcConfig)
+    });
+    const result = await r.json();
+    if (r.ok && result.ok) {
+      statusEl.textContent = 'All saved successfully!';
+      statusEl.style.color = 'var(--green)';
+      mcConfig = result.config || mcConfig;
       setTimeout(() => { statusEl.textContent = ''; }, 3000);
     } else {
       statusEl.textContent = 'Error: ' + (result.error || 'Unknown error');

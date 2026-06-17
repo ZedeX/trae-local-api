@@ -204,13 +204,16 @@ function getDeviceIds() {
 }
 
 function isTokenExpired(authInfo) {
-  if (!authInfo.expiredAt) return true;
-  return new Date(authInfo.expiredAt) < new Date();
+  if (!authInfo || !authInfo.expiredAt) return true;
+  const expiry = new Date(authInfo.expiredAt);
+  if (isNaN(expiry.getTime())) return true; // Invalid date = treat as expired
+  return expiry < new Date();
 }
 
 function isTokenExpiringSoon(authInfo, minutesThreshold) {
-  if (!authInfo.expiredAt) return true;
+  if (!authInfo || !authInfo.expiredAt) return true;
   const expiresAt = new Date(authInfo.expiredAt);
+  if (isNaN(expiresAt.getTime())) return true; // Invalid date = treat as expiring
   const threshold = minutesThreshold || 30;
   const warningTime = new Date(Date.now() + threshold * 60 * 1000);
   return expiresAt < warningTime;
@@ -267,7 +270,7 @@ async function exchangeToken(refreshToken) {
     body: JSON.stringify(body)
   };
 
-  const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy || '';
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy || '';
   if (proxyUrl) {
     try {
       if (proxyUrl.startsWith('socks')) {
@@ -293,6 +296,8 @@ async function exchangeToken(refreshToken) {
   return data;
 }
 
+let _refreshPromise = null; // Mutex for token refresh
+
 async function refreshTokenIfNeeded() {
   const authInfo = getAuthInfo();
 
@@ -307,63 +312,112 @@ async function refreshTokenIfNeeded() {
     return authInfo;
   }
 
-  console.log(`Token expiring soon or expired (at ${authInfo.expiredAt}), attempting refresh...`);
-
-  try {
-    const result = await exchangeToken(authInfo.refreshToken);
-    if (result && result.token) {
-      const newAuth = {
-        ...authInfo,
-        token: result.token,
-        refreshToken: result.refreshToken || authInfo.refreshToken,
-        expiredAt: result.expiredAt,
-        refreshExpiredAt: result.refreshExpiredAt || authInfo.refreshExpiredAt,
-        tokenReleaseAt: result.tokenReleaseAt || authInfo.tokenReleaseAt
-      };
-
-      if (authInfo._wasEncrypted) {
-        console.log(`Token refreshed successfully (in-memory only, original data was encrypted), new expiry: ${newAuth.expiredAt}`);
-        _cachedAuthInfo = newAuth;
-        return newAuth;
-      }
-
-      const storage = readStorageJsonByEdition(authInfo._edition || detectEdition());
-      const authKey = 'iCubeAuthInfo://icube.cloudide';
-      storage[authKey] = JSON.stringify({
-        token: newAuth.token,
-        refreshToken: newAuth.refreshToken,
-        expiredAt: newAuth.expiredAt,
-        refreshExpiredAt: newAuth.refreshExpiredAt,
-        tokenReleaseAt: newAuth.tokenReleaseAt,
-        userId: newAuth.userId,
-        host: newAuth.host,
-        userRegion: newAuth.userRegion,
-        account: newAuth.account
-      });
-
-      const storagePath = getStorageJsonPath(authInfo._edition);
-      fs.writeFileSync(storagePath, JSON.stringify(storage, null, '\t'), 'utf-8');
-      console.log(`Token refreshed successfully, new expiry: ${newAuth.expiredAt}`);
-      _cachedAuthInfo = newAuth;
-      return newAuth;
-    }
-  } catch (err) {
-    console.error(`Token refresh failed: ${err.message}`);
-    if (isTokenExpired(authInfo)) {
-      throw new Error('Token expired and refresh failed. Please restart Trae IDE to re-authenticate.');
-    }
+  // Mutex: if a refresh is already in progress, wait for it
+  if (_refreshPromise) {
+    return _refreshPromise;
   }
 
-  return authInfo;
+  _refreshPromise = (async () => {
+    console.log(`Token expiring soon or expired (at ${authInfo.expiredAt}), attempting refresh...`);
+
+    try {
+      const result = await exchangeToken(authInfo.refreshToken);
+      if (result && result.token) {
+        const newAuth = {
+          ...authInfo,
+          token: result.token,
+          refreshToken: result.refreshToken || authInfo.refreshToken,
+          expiredAt: result.expiredAt,
+          refreshExpiredAt: result.refreshExpiredAt || authInfo.refreshExpiredAt,
+          tokenReleaseAt: result.tokenReleaseAt || authInfo.tokenReleaseAt
+        };
+
+        if (authInfo._wasEncrypted) {
+          console.log(`Token refreshed successfully (in-memory only, original data was encrypted), new expiry: ${newAuth.expiredAt}`);
+          _cachedAuthInfo = newAuth;
+          return newAuth;
+        }
+
+        const storage = readStorageJsonByEdition(authInfo._edition || detectEdition());
+        const authKey = 'iCubeAuthInfo://icube.cloudide';
+        storage[authKey] = JSON.stringify({
+          token: newAuth.token,
+          refreshToken: newAuth.refreshToken,
+          expiredAt: newAuth.expiredAt,
+          refreshExpiredAt: newAuth.refreshExpiredAt,
+          tokenReleaseAt: newAuth.tokenReleaseAt,
+          userId: newAuth.userId,
+          host: newAuth.host,
+          userRegion: newAuth.userRegion,
+          account: newAuth.account
+        });
+
+        const storagePath = getStorageJsonPath(authInfo._edition);
+        fs.writeFileSync(storagePath, JSON.stringify(storage, null, '\t'), 'utf-8');
+        console.log(`Token refreshed successfully, new expiry: ${newAuth.expiredAt}`);
+        _cachedAuthInfo = newAuth;
+        return newAuth;
+      } else {
+        console.error('Token refresh returned no token');
+        if (isTokenExpired(authInfo)) {
+          throw new Error('Token expired and refresh returned no token. Please restart Trae IDE to re-authenticate.');
+        }
+        return authInfo;
+      }
+    } catch (err) {
+      console.error(`Token refresh failed: ${err.message}`);
+      if (isTokenExpired(authInfo)) {
+        throw new Error('Token expired and refresh failed. Please restart Trae IDE to re-authenticate.');
+      }
+    } finally {
+      _refreshPromise = null; // Clear mutex
+    }
+
+    return authInfo;
+  })();
+
+  return _refreshPromise;
+}
+
+function getApiHost() {
+  const envHost = process.env.TRAE_API_HOST;
+  if (envHost) return envHost;
+
+  try {
+    const authInfo = getAuthInfo();
+    if (authInfo._edition === 'cn') return 'https://trae-api-cn.mchost.guru';
+    const region = authInfo.userRegion || 'sg';
+    if (region === 'us') return 'https://coreva-normal.trae.ai';
+    return 'https://coresg-normal.trae.ai';
+  } catch (e) {
+    return 'https://coresg-normal.trae.ai';
+  }
 }
 
 function getIdeVersion() {
+  // Try to read from Trae's manifest.json for accurate version
+  try {
+    const edition = detectEdition();
+    const baseDir = edition === 'cn'
+      ? path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Trae-CN')
+      : path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Trae');
+    const manifestPath = path.join(baseDir, 'manifest.json');
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      if (manifest.appVersion) {
+        return manifest.appVersion;
+      }
+    }
+  } catch (e) {
+    // Fall through to defaults
+  }
+
   try {
     const authInfo = getAuthInfo();
-    if (authInfo._edition === 'cn') return '3.3.55';
+    if (authInfo._edition === 'cn') return '3.3.67';
     return '3.5.51';
   } catch (e) {
-    return '3.5.51';
+    return '3.3.67';
   }
 }
 
