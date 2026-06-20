@@ -355,7 +355,12 @@ Accept: text/event-stream
 | 05-08 16:30 | **更新 auth.js 集成解密模块，CN 版认证完全自动化** |
 | 05-08 17:00 | 更新 api-test.bat 系列文件，添加解密测试功能 |
 | 05-08 17:30 | 更新 README/PROGRESS/ARCHITECTURE/API/FILE_LIST 文档 |
+| 06-17 10:00 | **修复 Claude Code 多轮停止问题**：XML 工具调用解析、排队信息污染、`message_start` 提前发送 |
+| 06-17 14:00 | **实现 5 档模型分档系统**：同档并发竞速、按档降级、多模态自动切换 |
+| 06-18 09:00 | **DeepSeek tooluse 重新测试**：之前测试错误，确认 DeepSeek-V4-Pro 和 DeepSeek-V4-Flash 均支持 tooluse |
+| 06-18 10:00 | **档位调整**：Doubao-Seed-2.0-Code→T4, Doubao_1_6→T5, glm-5v-turbo→T3 |
+| 06-18 11:00 | **代码审计与鲁棒性修复**：token 刷新 mutex、无效日期处理、内存泄漏防护、异常捕获 |
 
 ---
 
-*最后更新：2026-05-08 17:30（会话 6 - CN 版加密破解 + 解密模块 + 文档更新）*
+*最后更新：2026-06-18 11:00（会话 8 - DeepSeek tooluse 验证 + 档位调整 + 代码审计）*
