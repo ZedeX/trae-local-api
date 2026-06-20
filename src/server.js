@@ -1368,6 +1368,13 @@ app.post('/v1/messages', authenticate, async (req, res) => {
                   if (parsed.position !== lastQueuePosition) {
                     lastQueuePosition = parsed.position;
 
+                    // Show waiting hint for popular models with long queues
+                    if (parsed.position > 50) {
+                      console.log(`[anthropic ${reqId}] ⚠️  Model is busy - queue position #${parsed.position}. This may take a few minutes. Consider using fallback models.`);
+                    } else if (parsed.position > 20) {
+                      console.log(`[anthropic ${reqId}] ⏳  Waiting in queue - position #${parsed.position}. Estimated wait: ~${Math.ceil(parsed.position * 30 / 60)} minutes.`);
+                    }
+
                     // 检查是否需要降级
                     const fbConfig = getFallbackConfig();
                     if (fbConfig.autoFallback && parsed.position > fbConfig.queueThreshold) {
