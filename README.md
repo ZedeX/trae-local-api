@@ -232,11 +232,11 @@ claude
 
 | 档位 | 名称 | 模型 | 图片 | 推理 |
 |------|------|------|------|------|
-| T1 | 旗舰 | glm-5.2, Doubao-Seed-2.0-Code | ✗/✓ | ✓ |
+| T1 | 旗舰 | glm-5.2 | ✗ | ✓ |
 | T2 | 强力 | glm-5.1, qwen-3.7-plus, kimi-k2.6, DeepSeek-V4-Pro | ✗/✓ | ✓ |
-| T3 | 中等 | glm-5, qwen-3.6-plus, minimax-m3, Doubao_1_6, DeepSeek-V4-Flash | ✗/✓ | ✓ |
-| T4 | 轻量 | glm-4.7, kimi-k2, qwen3-coder, minimax-m2.7 | ✗ | ✓ |
-| T5 | 最轻 | glm-4.6, glm-5v-turbo, minimax-m2.1, minimax-m2 | ✗/✓ | ✓ |
+| T3 | 中等 | glm-5, qwen-3.6-plus, minimax-m3, DeepSeek-V4-Flash, glm-5v-turbo | ✗/✓ | ✓ |
+| T4 | 轻量 | glm-4.7, kimi-k2, qwen3-coder, minimax-m2.7, Doubao-Seed-2.0-Code | ✗/✓ | ✓ |
+| T5 | 最轻 | glm-4.6, Doubao_1_6, minimax-m2.1, minimax-m2 | ✗/✓ | ✓ |
 
 ### Claude 模型映射
 
@@ -247,7 +247,7 @@ claude
 | claude-3.5/3.7-sonnet | glm-5.2 | T1 |
 | claude-haiku-4-5 | glm-5.1 | T2 |
 
-> 部分模型可能需要 Trae 付费订阅。DeepSeek-V4-Pro 不支持 tool_use，仅用于无工具对话。
+> 部分模型可能需要 Trae 付费订阅。DeepSeek-V4-Pro 和 DeepSeek-V4-Flash 均支持 tool_use。
 
 ---
 
