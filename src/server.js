@@ -37,6 +37,15 @@ const OUTPUT_SYNC_DIR = process.env.OUTPUT_SYNC_DIR || '';
 const AUTO_CONTINUE = process.env.AUTO_CONTINUE !== 'false'; // default true
 const MAX_CONTINUES = parseInt(process.env.MAX_CONTINUES || '5', 10);
 
+// Truncation detection thresholds (read from model-config.json settings, with env overrides)
+function getTruncationSettings() {
+  const settings = (modelConfig && modelConfig.settings) || {};
+  return {
+    textThreshold: parseInt(process.env.TRUNCATION_TEXT_THRESHOLD || settings.truncationTextThreshold || '200', 10),
+    similarityThreshold: parseFloat(process.env.TRUNCATION_SIMILARITY_THRESHOLD || settings.truncationSimilarityThreshold || '0.5'),
+  };
+}
+
 const pendingSyncFiles = [];
 
 // 服务启动时间 (moved here to be available for /health and /v1/dashboard/status routes)
@@ -58,7 +67,8 @@ function isResponseTruncated(state) {
 
   if (!text && !state.hasToolUse && reasoning.length > 0) return true;
 
-  if (!state.hasToolUse && reasoning.length > 0 && text.length < 200) return true;
+  const { textThreshold } = getTruncationSettings();
+  if (!state.hasToolUse && reasoning.length > 0 && text.length < textThreshold) return true;
 
   if (!text) return false;
 
@@ -1630,7 +1640,8 @@ app.post('/v1/messages', authenticate, async (req, res) => {
           // Check if we should auto-continue
           if (AUTO_CONTINUE && streamState && streamState.messageStopped && isResponseTruncated(streamState) && continueCount < MAX_CONTINUES) {
             const currentText = (streamState.textContent || '').trim();
-            const isShortResponse = currentText.length < 200;
+            const { textThreshold, similarityThreshold } = getTruncationSettings();
+            const isShortResponse = currentText.length < textThreshold;
 
             if (isShortResponse && lastShortText && currentText.length > 0) {
               const overlap = Math.min(lastShortText.length, currentText.length);
@@ -1639,7 +1650,7 @@ app.post('/v1/messages', authenticate, async (req, res) => {
                 if (lastShortText[i] === currentText[i]) sameChars++;
               }
               const similarity = overlap > 0 ? sameChars / overlap : 0;
-              if (similarity > 0.5) {
+              if (similarity > similarityThreshold) {
                 console.log(`[anthropic ${reqId}] Short response repeated (similarity=${(similarity*100).toFixed(0)}%), stopping auto-continue to avoid loop`);
                 if (streamState.messageStopped && streamState.suppressStopEvents && !res.writableEnded) {
                   const finalReason = streamState.hasToolUse ? 'tool_use' : (streamState.stopReason || 'end_turn');

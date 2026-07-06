@@ -340,7 +340,7 @@
       "toolcall_compatible": null,
       "multimodal": true,
       "reasoning": false,
-      "tier": "T4"
+      "tier": 4
     },
     "qwen-3-5": {
       "function": "chat_v3",
@@ -349,7 +349,7 @@
       "toolcall_compatible": null,
       "multimodal": true,
       "reasoning": false,
-      "tier": "T5"
+      "tier": 5
     },
     "doubao-seed-2-1-pro": {
       "function": "chat_v3",
@@ -358,7 +358,7 @@
       "toolcall_compatible": null,
       "multimodal": true,
       "reasoning": false,
-      "tier": "T2"
+      "tier": 2
     },
     "doubao-seed-2-1-turbo": {
       "function": "chat_v3",
@@ -367,7 +367,7 @@
       "toolcall_compatible": null,
       "multimodal": true,
       "reasoning": false,
-      "tier": "T3"
+      "tier": 3
     },
     "kimi-k2-7-code": {
       "function": "chat_v3",
@@ -376,7 +376,7 @@
       "toolcall_compatible": null,
       "multimodal": true,
       "reasoning": false,
-      "tier": "T2"
+      "tier": 2
     },
     "deepseek-v3-1": {
       "function": "chat_v3",
@@ -385,7 +385,7 @@
       "toolcall_compatible": null,
       "multimodal": false,
       "reasoning": false,
-      "tier": "T3"
+      "tier": 3
     }
   },
   "tiers": {

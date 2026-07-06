@@ -250,7 +250,7 @@ for k, v in rows:
 
     for (const m of newModels) {
       const key = m.config_name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      const tier = tierMapping[m.config_name] || 'T3';
+      const tier = tierMapping[m.config_name] || 3;
 
       // Determine function: prefer chat-capable functions
       let funcName = 'chat_v3';
