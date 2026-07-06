@@ -17,7 +17,8 @@ const {
   createAnthropicMessageStop,
   createAnthropicError,
   anthropicToOpenAIMessages,
-  llmUtilsChunkToAnthropic
+  llmUtilsChunkToAnthropic,
+  parseToolcallContent
 } = require('./anthropic-format');
 const { encrypt, decrypt, hashContent } = require('./crypto');
 const { v4: uuidv4 } = require('./uuid');
@@ -1806,9 +1807,52 @@ app.post('/v1/messages', authenticate, async (req, res) => {
         if (fullReasoning) {
           contentBlocks.push({ type: 'thinking', thinking: fullReasoning });
         }
-        if (fullContent) {
-          contentBlocks.push({ type: 'text', text: fullContent });
+
+        // Extract <toolcall> tags from fullContent (non-streaming path)
+        // This mirrors the streaming path's llmUtilsChunkToAnthropic behavior
+        let textContent = fullContent;
+        const extractedToolCalls = [];
+        const toolcallRegex = /<tool_?call>\s*([\s\S]*?)\s*<\/tool_?call>/g;
+        let tcMatch;
+        while ((tcMatch = toolcallRegex.exec(fullContent)) !== null) {
+          try {
+            const parsed = parseToolcallContent(tcMatch[1]);
+            if (parsed && parsed.name) {
+              extractedToolCalls.push(parsed);
+            }
+          } catch(e) {
+            console.log(`[anthropic] Non-stream toolcall parse failed: ${e.message}`);
+          }
         }
+        // Also try loose regex for unclosed toolcall tags (truncation recovery)
+        const looseRegex = /<tool_?call>\s*([\s\S]*?)(?:<\/tool_?call>|$)/g;
+        while ((tcMatch = looseRegex.exec(fullContent)) !== null) {
+          const inner = tcMatch[1].trim();
+          if (!inner) continue;
+          try {
+            const parsed = parseToolcallContent(inner);
+            if (parsed && parsed.name) {
+              // Dedup against already extracted
+              const dup = extractedToolCalls.some(tc =>
+                tc.name === parsed.name && JSON.stringify(tc.params) === JSON.stringify(parsed.params)
+              );
+              if (!dup) extractedToolCalls.push(parsed);
+            }
+          } catch(e) { /* ignore */ }
+        }
+        // Remove toolcall tags from text content
+        if (extractedToolCalls.length > 0) {
+          textContent = fullContent.replace(/<tool_?call>[\s\S]*?<\/tool_?call>/g, '').trim();
+          // Also remove any unclosed toolcall tags
+          textContent = textContent.replace(/<tool_?call>[\s\S]*$/g, '').trim();
+          hasToolUse = true;
+        }
+
+        if (textContent) {
+          contentBlocks.push({ type: 'text', text: textContent });
+        }
+
+        // Add Trae-native tool_calls
         for (const tc of toolCalls) {
           const toolId = tc.id || `toolu_${uuidv4().replace(/-/g, '').substring(0, 24)}`;
           const toolName = tc.function?.name || tc.name || '';
@@ -1819,6 +1863,27 @@ app.post('/v1/messages', authenticate, async (req, res) => {
             id: toolId,
             name: toolName,
             input: toolInput
+          });
+        }
+
+        // Add extracted toolcall tags as tool_use blocks
+        // Apply toolMap if available (built earlier when tools were sent)
+        for (const tc of extractedToolCalls) {
+          let toolName = tc.name;
+          if (toolMap) {
+            const lower = tc.name.toLowerCase();
+            if (toolMap[lower]) {
+              toolName = toolMap[lower];
+            } else if (toolMap[tc.name]) {
+              toolName = toolMap[tc.name];
+            }
+          }
+          const toolId = `toolu_${uuidv4().replace(/-/g, '').substring(0, 24)}`;
+          contentBlocks.push({
+            type: 'tool_use',
+            id: toolId,
+            name: toolName,
+            input: tc.params || {}
           });
         }
 

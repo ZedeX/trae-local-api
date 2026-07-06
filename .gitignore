@@ -23,10 +23,10 @@ output/
 tmp-userdata/
 **/tmp-userdata/
 
-# Test data & scripts (探索/测试脚本不同步)
-scripts/
-test-*.json
-tests/
+# Test data & archive (探索/测试脚本不同步, but allow scripts/ and tests/ source files)
+scripts/archive/
+tests/data/
+tests/results/
 
 # Root-level temporary scripts and test data (use / prefix to limit to root only)
 /_*.js
