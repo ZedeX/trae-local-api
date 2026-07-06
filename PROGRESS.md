@@ -360,7 +360,8 @@ Accept: text/event-stream
 | 06-18 09:00 | **DeepSeek tooluse 重新测试**：之前测试错误，确认 DeepSeek-V4-Pro 和 DeepSeek-V4-Flash 均支持 tooluse |
 | 06-18 10:00 | **档位调整**：Doubao-Seed-2.0-Code→T4, Doubao_1_6→T5, glm-5v-turbo→T3 |
 | 06-18 11:00 | **代码审计与鲁棒性修复**：token 刷新 mutex、无效日期处理、内存泄漏防护、异常捕获 |
+| 07-06 10:00 | **Dashboard 路由修复 + 项目整洁化**：根路由 `/` 改为返回 Dashboard HTML 页面，JSON 接口清单移至 `/v1/info`，新增 `/health` 健康检查端点；根目录临时脚本归档到 `scripts/archive/`，测试数据归档到 `tests/data/`，截图归档到 `docs/screenshots/`；版本号统一到 2.1.0 |
 
 ---
 
-*最后更新：2026-06-18 11:00（会话 8 - DeepSeek tooluse 验证 + 档位调整 + 代码审计）*
+*最后更新：2026-07-06 10:00（会话 9 - Dashboard 路由修复 + 项目整洁化）*

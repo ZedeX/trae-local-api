@@ -36,6 +36,9 @@ const MAX_CONTINUES = parseInt(process.env.MAX_CONTINUES || '5', 10);
 
 const pendingSyncFiles = [];
 
+// 服务启动时间 (moved here to be available for /health and /v1/dashboard/status routes)
+const serverStartTime = Date.now();
+
 /**
  * Detect if the model response was truncated and should be auto-continued.
  * Returns true if the response seems incomplete.
@@ -832,10 +835,21 @@ app.get('/v1/files/read', authenticate, (req, res) => {
   }
 });
 
+// Root route: serve Dashboard HTML page (no auth required)
 app.get('/', (req, res) => {
+  const filePath = path.join(__dirname, '..', 'web', 'dashboard.html');
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send('Dashboard page not found. Ensure web/dashboard.html exists.');
+  }
+});
+
+// API info endpoint (requires auth) - moved from root
+app.get('/v1/info', authenticate, (req, res) => {
   res.json({
     name: 'Trae Local API',
-    version: '2.0.0',
+    version: '2.1.0',
     description: 'OpenAI-compatible API wrapper for Trae IDE',
     endpoints: {
       chat: 'POST /v1/chat/completions',
@@ -849,11 +863,26 @@ app.get('/', (req, res) => {
       status: 'GET /v1/status',
       encrypt: 'POST /v1/encrypt',
       decrypt: 'POST /v1/decrypt',
-      dashboard: 'GET /v1/dashboard (HTML page)',
+      dashboard: 'GET / (HTML page)',
       dashboard_api: 'GET /v1/dashboard/status|sessions|requests|stats',
+      info: 'GET /v1/info',
+      health: 'GET /health',
     },
     primary_endpoint: '/api/agent/v3/llm_utils_chat',
     functions: Object.keys(FUNCTION_MAP),
+  });
+});
+
+// Health check endpoint (no auth required) - for uptime monitoring
+app.get('/health', (req, res) => {
+  const uptime = Date.now() - serverStartTime;
+  const uptimeStr = `${Math.floor(uptime / 3600000)}h ${Math.floor((uptime % 3600000) / 60000)}m ${Math.floor((uptime % 60000) / 1000)}s`;
+  res.json({
+    status: 'ok',
+    version: '2.1.0',
+    uptime: uptimeStr,
+    uptime_ms: uptime,
+    startedAt: new Date(serverStartTime).toISOString(),
   });
 });
 
@@ -899,15 +928,12 @@ function sanitizeWorkspace(ws) {
   return String(ws).replace(/[<>:"/\\|?*]/g, '_').replace(/[^a-zA-Z0-9_\-\.\u4e00-\u9fff]/g, '-').substring(0, 64) || 'default';
 }
 
-// 服务启动时间
-const serverStartTime = Date.now();
-
 app.get('/v1/dashboard/status', authenticate, (req, res) => {
   const uptime = Date.now() - serverStartTime;
   const uptimeStr = `${Math.floor(uptime / 3600000)}h ${Math.floor((uptime % 3600000) / 60000)}m ${Math.floor((uptime % 60000) / 1000)}s`;
   res.json({
     name: 'Trae Local API',
-    version: '2.0.0',
+    version: '2.1.0',
     port: PORT,
     uptime: uptimeStr,
     uptime_ms: uptime,
@@ -1094,6 +1120,7 @@ app.delete('/v1/dashboard/model-config/models/:key', authenticate, (req, res) =>
   }
 });
 
+// /v1/dashboard: backward-compatible route (returns same Dashboard HTML as root /)
 app.get('/v1/dashboard', (req, res) => {
   const filePath = path.join(__dirname, '..', 'web', 'dashboard.html');
   if (fs.existsSync(filePath)) {

@@ -12,12 +12,12 @@ Trae CN 版为了防止 token 被提取，对本地存储的认证数据使用�
 
 <!-- 截图1：服务启动成功 -->
 
-![服务启动成功](screenshots/01-server-start.png)
+![服务启动成功](docs/screenshots/01-server-start.png)
 *图1：trae-local-api 服务启动成功，自动解密 CN 版认证数据*
 
 <!-- 截图2：Claude Code 通过本地 API 使用 Trae 模型 -->
 
-![Claude Code 调用](screenshots/02-claude-code.png)
+![Claude Code 调用](docs/screenshots/02-claude-code.png)
 *图2：Claude Code 通过本地 API 调用 Trae 的 GLM-5.2 模型*
 
 ***
@@ -35,7 +35,7 @@ SG 版路径：%APPDATA%\Trae\User\globalStorage\storage.json
 
 <!-- 截图3：storage.json 文件位置 -->
 
-![storage.json 位置](screenshots/03-storage-location.png)
+![storage.json 位置](docs/screenshots/03-storage-location.png)
 *图3：storage.json 文件所在目录*
 
 ### 2.2 认证数据的 Key
@@ -62,7 +62,7 @@ dGMFAQAAAC...（很长的 Base64 字符串）
 
 <!-- 截图4：CN 版 storage.json 中加密的认证数据 -->
 
-![加密数据](screenshots/04-encrypted-data.png)
+![加密数据](docs/screenshots/04-encrypted-data.png)
 *图4：CN 版 storage.json 中的加密认证数据（以 Base64 形式存储）*
 
 ### 2.3 为什么需要破解
@@ -96,7 +96,7 @@ const buffer = Buffer.from(base64Value, 'base64');
 
 <!-- 截图5：Base64 解码后的二进制头部 -->
 
-![二进制头部](screenshots/05-binary-header.png)
+![二进制头部](docs/screenshots/05-binary-header.png)
 *图5：Base64 解码后的二进制数据，前两个字节为 0x74 0x63（即 "tc"）*
 
 ### 3.2 第二步：识别加密类型
@@ -148,7 +148,7 @@ const encryptedData = buffer.slice(38);        // 加密数据
 
 <!-- 截图6：数据结构解析示意图 -->
 
-![数据结构](screenshots/06-data-structure.png)
+![数据结构](docs/screenshots/06-data-structure.png)
 *图6：tc 加密格式的数据结构：Header + RandomBytes + EncryptedData*
 
 ### 3.4 第四步：密钥派生（核心破解）
@@ -170,7 +170,7 @@ const SALT_D = Uint8Array.from([246,204,26,232,232,70,129,109,223,146,169,242,23
 
 <!-- 截图7：在 Trae CN 的 JS 代码中找到盐值 -->
 
-![盐值代码](screenshots/07-salt-values.png)
+![盐值代码](docs/screenshots/07-salt-values.png)
 *图7：在 Trae CN 的前端 JS 代码中找到硬编码的盐值*
 
 #### 3.4.2 盐值选择规则
@@ -241,7 +241,7 @@ function deriveKeyAndIV(randomBytes, encType) {
 
 <!-- 截图8：密钥派生流程图 -->
 
-![密钥派生](screenshots/08-key-derivation.png)
+![密钥派生](docs/screenshots/08-key-derivation.png)
 *图8：密钥派生流程：RandomBytes → SHA-512 → +Salt → SHA-512 → 拆分 Key/IV*
 
 ### 3.5 第五步：AES-128-CBC 解密
@@ -282,7 +282,7 @@ const result = plaintext.toString('utf8');  // 得到明文 JSON 字符串
 
 <!-- 截图9：解密成功，得到明文 JSON -->
 
-![解密成功](screenshots/09-decrypt-success.png)
+![解密成功](docs/screenshots/09-decrypt-success.png)
 *图9：解密成功！得到包含 token、refreshToken 等字段的明文 JSON*
 
 ### 3.7 完整解密流程图
@@ -473,7 +473,7 @@ npm start
 
 <!-- 截图10：npm start 启动服务 -->
 
-![启动服务](screenshots/10-npm-start.png)
+![启动服务](docs/screenshots/10-npm-start.png)
 *图10：npm start 启动 trae-local-api 服务*
 
 启动成功后看到：
@@ -504,7 +504,7 @@ curl -N http://localhost:19900/v1/chat/completions \
 
 <!-- 截图11：curl 测试成功 -->
 
-![curl 测试](screenshots/11-curl-test.png)
+![curl 测试](docs/screenshots/11-curl-test.png)
 *图11：使用 curl 测试 API，成功返回流式响应*
 
 ### 5.5 配置 Claude Code
@@ -517,7 +517,7 @@ claude
 
 <!-- 截图12：Claude Code 成功连接 -->
 
-![Claude Code](screenshots/12-claude-code-connected.png)
+![Claude Code](docs/screenshots/12-claude-code-connected.png)
 *图12：Claude Code 通过本地 API 成功调用 Trae 模型*
 
 ### 5.6 配置 Cursor
@@ -528,7 +528,7 @@ claude
 
 <!-- 截图13：Cursor 配置 -->
 
-![Cursor 配置](screenshots/13-cursor-config.png)
+![Cursor 配置](docs/screenshots/13-cursor-config.png)
 *图13：在 Cursor 中配置本地 API*
 
 ### 5.7 Python 调用
@@ -554,7 +554,7 @@ for chunk in response:
 
 <!-- 截图14：Python 调用成功 -->
 
-![Python 调用](screenshots/14-python-test.png)
+![Python 调用](docs/screenshots/14-python-test.png)
 *图14：使用 Python OpenAI SDK 调用本地 API*
 
 ***
@@ -598,7 +598,7 @@ for chunk in response:
 
 <!-- 截图15：降级日志 -->
 
-![降级日志](screenshots/15-fallback-log.png)
+![降级日志](docs/screenshots/15-fallback-log.png)
 *图15：热门模型排队时自动降级到同档/下一档模型*
 
 ***
@@ -760,7 +760,7 @@ trae-local-api/
 
 <!-- 截图16：F12 提取 token -->
 
-![F12 提取](screenshots/16-f12-token.png)
+![F12 提取](docs/screenshots/16-f12-token.png)
 *图16：通过 F12 开发者工具提取 JWT token*
 
 ### 方法二：使用 extract-token.bat

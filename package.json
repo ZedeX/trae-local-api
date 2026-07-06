@@ -1,6 +1,6 @@
 {
   "name": "trae-local-api",
-  "version": "1.0.0",
+  "version": "2.1.0",
   "description": "Trae IDE Local API Wrapper - OpenAI Compatible Interface",
   "main": "src/server.js",
   "scripts": {

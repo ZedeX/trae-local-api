@@ -149,6 +149,26 @@ claude
 
 ---
 
+## API 端点
+
+| 端点 | 方法 | 用途 | 认证 |
+|------|------|------|------|
+| `/` | GET | Dashboard HTML 页面（流量日志查看器） | 无 |
+| `/health` | GET | 健康检查（返回 status 和 uptime） | 无 |
+| `/v1/info` | GET | API 接口清单（所有可用端点说明） | 需要 |
+| `/v1/status` | GET | 服务状态 | 需要 |
+| `/v1/models` | GET | 可用模型列表 | 需要 |
+| `/v1/models/detail` | GET | 模型详情（含能力、档位） | 需要 |
+| `/v1/chat/completions` | POST | OpenAI 兼容对话接口 | 需要 |
+| `/v1/messages` | POST | Anthropic 兼容对话接口 | 需要 |
+| `/v1/chat/file` | POST | 文件输出对话接口（保存回复到文件） | 需要 |
+| `/v1/dashboard/status` | GET | Dashboard 状态数据 | 需要 |
+| `/v1/dashboard/sessions` | GET | Dashboard 会话列表 | 需要 |
+| `/v1/dashboard/requests` | GET | Dashboard 请求记录 | 需要 |
+| `/v1/dashboard/stats` | GET | Dashboard 统计数据 | 需要 |
+
+---
+
 ## 使用方法
 
 ### cURL
@@ -378,7 +398,7 @@ trae-local-api/
 日志保存在 `logs/YYYY-MM-DD/workspace/` 目录，每个请求一个 JSON 文件。访问 Dashboard：
 
 ```
-http://localhost:19900/v1/dashboard
+http://localhost:19900/
 ```
 
 ### Q: 如何更新模型列表

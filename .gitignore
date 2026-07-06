@@ -28,6 +28,20 @@ scripts/
 test-*.json
 tests/
 
+# Root-level temporary scripts and test data (use / prefix to limit to root only)
+/_*.js
+/_*.json
+/test-*.json
+/test_*.js
+/bun.lock
+
+# Python cache (not part of Node project)
+__pycache__/
+*.pyc
+
+# Screenshots are in docs/screenshots/ now
+/screenshots/
+
 # IDE
 .vscode/
 .idea/
