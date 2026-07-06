@@ -1,2 +1,3 @@
-cd /d E:\git\_archieves\trae-local-api
+@echo off
+cd /d "%~dp0"
 npm start

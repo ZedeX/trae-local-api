@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+const PACKAGE_VERSION = require('../package.json').version;
+
 const { getAuthInfo, getDeviceIds, isTokenExpired, getApiHost, refreshTokenIfNeeded, detectEdition } = require('./auth');
 const { llmUtilsChat, chatCompletion, createAgentTask, getModelDetailParam, getChatModes, resolveModelId, MODEL_MAP, REVERSE_MODEL_MAP, FUNCTION_MAP, getFallbackConfig, saveFallbackConfig, getFallbackChain, getRaceModels, isRaceFallbackEnabled, getTiers, getModelsInTier, getTierOfModel, isTieredFallbackEnabled, isRaceWithinTierEnabled, getFallbackModel, getSameTierModels, getNextTierModels, findMultimodalModel, getModelConfig, saveModelConfig, rebuildDerivedMaps } = require('./trae-client');
 const { createOpenAIChatCompletion, createOpenAIStreamChunk, createOpenAIModels, parseLlmUtilsChatStream, llmUtilsChunkToOpenAI, parseAgentTaskStream, parseTraeStreamChunk, traeChunkToOpenAI } = require('./openai-format');
@@ -850,7 +852,7 @@ app.get('/', (req, res) => {
 app.get('/v1/info', authenticate, (req, res) => {
   res.json({
     name: 'Trae Local API',
-    version: '2.1.0',
+    version: PACKAGE_VERSION,
     description: 'OpenAI-compatible API wrapper for Trae IDE',
     endpoints: {
       chat: 'POST /v1/chat/completions',
@@ -880,7 +882,7 @@ app.get('/health', (req, res) => {
   const uptimeStr = `${Math.floor(uptime / 3600000)}h ${Math.floor((uptime % 3600000) / 60000)}m ${Math.floor((uptime % 60000) / 1000)}s`;
   res.json({
     status: 'ok',
-    version: '2.1.0',
+    version: PACKAGE_VERSION,
     uptime: uptimeStr,
     uptime_ms: uptime,
     startedAt: new Date(serverStartTime).toISOString(),
@@ -934,7 +936,7 @@ app.get('/v1/dashboard/status', authenticate, (req, res) => {
   const uptimeStr = `${Math.floor(uptime / 3600000)}h ${Math.floor((uptime % 3600000) / 60000)}m ${Math.floor((uptime % 60000) / 1000)}s`;
   res.json({
     name: 'Trae Local API',
-    version: '2.1.0',
+    version: PACKAGE_VERSION,
     port: PORT,
     uptime: uptimeStr,
     uptime_ms: uptime,

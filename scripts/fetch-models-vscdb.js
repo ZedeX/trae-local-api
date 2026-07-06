@@ -21,26 +21,35 @@ try {
 const { getModelConfig, saveModelConfig, rebuildDerivedMaps } = require('../src/trae-client');
 const { getAuthInfo } = require('../src/auth');
 
-const TRAE_CN_DATA_DIR = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN');
+// Trae CN data dir — support env override for non-default installations
+const TRAE_CN_DATA_DIR = process.env.TRAE_CN_DATA_DIR || path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN');
 const VSCDB_PATH = path.join(TRAE_CN_DATA_DIR, 'User', 'globalStorage', 'state.vscdb');
 
-// Tiers mapping based on model capability (from existing model-config.json)
-const TIER_MAPPING = {
-  // T1 旗舰
-  'glm-5.2': 'T1',
-  // T2 强力
-  'glm-5.1': 'T2', 'qwen-3.7-plus': 'T2', 'kimi-k2.6': 'T2', 'kimi-k2.7-code': 'T2',
-  'DeepSeek-V4-Pro': 'T2', 'Doubao-Seed-2.1-Pro': 'T2',
-  // T3 中等
-  'glm-5': 'T3', 'qwen-3.6-plus': 'T3', 'minimax-m3': 'T3',
-  'DeepSeek-V4-Flash': 'T3', 'glm-5v-turbo': 'T3', 'Doubao-Seed-2.1-Turbo': 'T3',
-  // T4 轻量
-  'glm-4.7': 'T4', 'kimi-k2': 'T4', 'kimi-k2.5': 'T4', 'qwen3-coder': 'T4',
-  'minimax-m2.7': 'T4', 'Doubao-Seed-2.0-Code': 'T4',
-  // T5 最轻
-  'glm-4.6': 'T5', 'Doubao_1_6': 'T5', 'minimax-m2.1': 'T5', 'minimax-m2': 'T5',
-  'qwen-3.5': 'T5',
-};
+// Build tier mapping dynamically from model-config.json instead of hardcoding.
+// This ensures consistency: if model-config.json tiers change, the script picks them up.
+function buildTierMapping() {
+  const config = getModelConfig();
+  const mapping = {};
+  // Map from each model's config_name to its tier
+  if (config.models) {
+    for (const [key, entry] of Object.entries(config.models)) {
+      if (entry.config_name && entry.tier) {
+        mapping[entry.config_name] = String(entry.tier);
+      }
+    }
+  }
+  // Also map from tier definitions (tier name -> array of models)
+  if (config.tiers) {
+    for (const [tierName, models] of Object.entries(config.tiers)) {
+      if (Array.isArray(models)) {
+        for (const m of models) {
+          if (!mapping[m]) mapping[m] = tierName;
+        }
+      }
+    }
+  }
+  return mapping;
+}
 
 function readVscdb(vscdbPath, userId) {
   const key = `${userId}_AI.agent.model.model_list_map`;
@@ -222,12 +231,15 @@ for k, v in rows:
     }
   }
 
+  // Build tier mapping from model-config.json (dynamic, not hardcoded)
+  const tierMapping = buildTierMapping();
+
   // Print all cache models sorted
   console.log('\n=== All Models in Trae CN Cache ===');
   const sorted = Array.from(allModels.values()).sort((a, b) => a.config_name.localeCompare(b.config_name));
   for (const m of sorted) {
     const inLocal = localConfigNames.has(m.config_name) ? '✓' : '+';
-    const tier = TIER_MAPPING[m.config_name] || '?';
+    const tier = tierMapping[m.config_name] || '?';
     console.log(`  ${inLocal} [${tier}] ${m.config_name} (${m.display_name})${m.multimodal ? ' [multimodal]' : ''}`);
   }
 
@@ -238,7 +250,7 @@ for k, v in rows:
 
     for (const m of newModels) {
       const key = m.config_name.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-      const tier = TIER_MAPPING[m.config_name] || 'T3';
+      const tier = tierMapping[m.config_name] || 'T3';
 
       // Determine function: prefer chat-capable functions
       let funcName = 'chat_v3';

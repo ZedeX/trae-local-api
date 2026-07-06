@@ -111,8 +111,9 @@ const HTTP_PROXY = process.env.HTTP_PROXY || process.env.http_proxy || '';
 const HTTPS_PROXY = process.env.HTTPS_PROXY || process.env.https_proxy || '';
 const ALL_PROXY = process.env.ALL_PROXY || process.env.all_proxy || '';
 
-const MAX_RETRIES = 3;
-const RETRY_BASE_DELAY = 2000;
+const MAX_RETRIES = parseInt(process.env.TRAE_MAX_RETRIES || '3', 10);
+const RETRY_BASE_DELAY = parseInt(process.env.TRAE_RETRY_DELAY || '2000', 10);
+const MAX_TOKENS_LIMIT = parseInt(process.env.TRAE_MAX_TOKENS_LIMIT || '128000', 10);
 const RATE_LIMIT_CODES = [4011, 429];
 
 let _httpsAgent = null;
@@ -279,7 +280,7 @@ function isRaceWithinTierEnabled() {
 }
 
 function getFallbackModel() {
-  return fallbackConfig.fallbackModel || 'glm-5';
+  return fallbackConfig.fallbackModel || process.env.TRAE_FALLBACK_MODEL || 'glm-5';
 }
 
 // Get all models in the same tier as the given config_name (excluding itself)
@@ -371,7 +372,7 @@ async function llmUtilsChat(messages, model, stream, options) {
     const requestId = uuidv4();
 
     if (options?.max_tokens && typeof options.max_tokens === 'number') {
-      body.max_tokens = Math.min(options.max_tokens, 128000);
+      body.max_tokens = Math.min(options.max_tokens, MAX_TOKENS_LIMIT);
     }
 
     const headers = buildStreamHeaders(authInfo, deviceIds, requestId);

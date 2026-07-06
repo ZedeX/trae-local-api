@@ -219,6 +219,18 @@ function isTokenExpiringSoon(authInfo, minutesThreshold) {
   return expiresAt < warningTime;
 }
 
+// Default Trae API hosts (overridable via env). These are shared Trae-client
+// endpoints (not per-user secrets); defaults are required for the wrapper to work.
+const DEFAULT_HOST_CN = process.env.TRAE_HOST_CN || 'https://trae-api-cn.mchost.guru';
+const DEFAULT_HOST_SG = process.env.TRAE_HOST_SG || 'https://coresg-normal.trae.ai';
+const DEFAULT_HOST_US = process.env.TRAE_HOST_US || 'https://coreva-normal.trae.ai';
+
+// Default IDE version/device info (overridable via env). Used as fallback when
+// Trae's manifest.json cannot be read. Update when Trae CN/SG releases new builds.
+const DEFAULT_IDE_VERSION_CN = '3.3.67';
+const DEFAULT_IDE_VERSION_SG = '3.5.51';
+const DEFAULT_IDE_VERSION_CODE = '20260401';
+
 function getApiHost() {
   const envHost = process.env.TRAE_API_HOST;
   if (envHost) return envHost;
@@ -227,26 +239,28 @@ function getApiHost() {
     const authInfo = getAuthInfo();
     const authEdition = authInfo._edition;
     if (authEdition === 'cn') {
-      return 'https://trae-api-cn.mchost.guru';
+      return DEFAULT_HOST_CN;
     }
-    const region = authInfo.userRegion?.region?.toUpperCase();
-    if (region === 'SG') return 'https://coresg-normal.trae.ai';
-    if (region === 'US') return 'https://coreva-normal.trae.ai';
-    return 'https://coresg-normal.trae.ai';
+    const region = (authInfo.userRegion?.region || authInfo.userRegion || '').toString().toUpperCase();
+    if (region === 'US') return DEFAULT_HOST_US;
+    return DEFAULT_HOST_SG;
   } catch (e) {
-    return 'https://coresg-normal.trae.ai';
+    return DEFAULT_HOST_SG;
   }
 }
 
 function getAuthHost() {
+  const envHost = process.env.TRAE_AUTH_HOST;
+  if (envHost) return envHost;
+
   try {
     const authInfo = getAuthInfo();
     if (authInfo._edition === 'cn') {
-      return 'https://trae-api-cn.mchost.guru';
+      return DEFAULT_HOST_CN;
     }
-    return 'https://coresg-normal.trae.ai';
+    return DEFAULT_HOST_SG;
   } catch (e) {
-    return 'https://coresg-normal.trae.ai';
+    return DEFAULT_HOST_SG;
   }
 }
 
@@ -379,22 +393,10 @@ async function refreshTokenIfNeeded() {
   return _refreshPromise;
 }
 
-function getApiHost() {
-  const envHost = process.env.TRAE_API_HOST;
-  if (envHost) return envHost;
-
-  try {
-    const authInfo = getAuthInfo();
-    if (authInfo._edition === 'cn') return 'https://trae-api-cn.mchost.guru';
-    const region = authInfo.userRegion || 'sg';
-    if (region === 'us') return 'https://coreva-normal.trae.ai';
-    return 'https://coresg-normal.trae.ai';
-  } catch (e) {
-    return 'https://coresg-normal.trae.ai';
-  }
-}
-
 function getIdeVersion() {
+  // Explicit env override takes highest priority
+  if (process.env.TRAE_IDE_VERSION) return process.env.TRAE_IDE_VERSION;
+
   // Try to read from Trae's manifest.json for accurate version
   try {
     const edition = detectEdition();
@@ -414,15 +416,15 @@ function getIdeVersion() {
 
   try {
     const authInfo = getAuthInfo();
-    if (authInfo._edition === 'cn') return '3.3.67';
-    return '3.5.51';
+    if (authInfo._edition === 'cn') return DEFAULT_IDE_VERSION_CN;
+    return DEFAULT_IDE_VERSION_SG;
   } catch (e) {
-    return '3.3.67';
+    return DEFAULT_IDE_VERSION_CN;
   }
 }
 
 function getIdeVersionCode() {
-  return '20260401';
+  return process.env.TRAE_IDE_VERSION_CODE || DEFAULT_IDE_VERSION_CODE;
 }
 
 function getDeviceInfo() {
@@ -432,11 +434,11 @@ function getDeviceInfo() {
   const sqmId = storage['telemetry.sqmId'] || '';
   const devDeviceId = storage['telemetry.devDeviceId'] || '';
   return {
-    cpu: 'Intel',
+    cpu: process.env.TRAE_CPU || 'Intel',
     device_id: hashDeviceId(machineId) || process.env.TRAE_DEVICE_ID || '',
     machine_id: machineId || process.env.TRAE_MACHINE_ID || '',
     device_model: process.env.TRAE_DEVICE_MODEL || '82RF',
-    os_name: 'windows',
+    os_name: process.env.TRAE_OS_NAME || 'windows',
     os_version: process.env.TRAE_OS_VERSION || 'Windows 10'
   };
 }
