@@ -25,6 +25,7 @@ const {
 const { encrypt, decrypt, hashContent } = require('./crypto');
 const { v4: uuidv4 } = require('./uuid');
 const trafficLogger = require('./traffic-logger');
+const sessionsRepo = require('./sessions');
 
 const app = express();
 app.use(cors());
@@ -855,6 +856,16 @@ app.get('/', (req, res) => {
     res.sendFile(filePath);
   } else {
     res.status(404).send('Dashboard page not found. Ensure web/dashboard.html exists.');
+  }
+});
+
+// Studio route: serve the chat portal (no auth required; API calls use API_KEY)
+app.get('/studio', (req, res) => {
+  const filePath = path.join(__dirname, '..', 'web', 'index.html');
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).send('Studio page not found. Ensure web/index.html exists.');
   }
 });
 
@@ -1917,6 +1928,72 @@ app.post('/v1/messages', authenticate, async (req, res) => {
       type: 'internal_error',
       message: err.message
     }));
+  }
+});
+
+// ===== Sessions API (Phase 1: Web Portal v2) =====
+// Source of truth: docs/PRD-web-portal-v2.md, plans/web-portal-v2.md
+
+app.get('/v1/sessions', authenticate, (req, res) => {
+  try {
+    const sessions = sessionsRepo.listSessions({ q: req.query.q });
+    res.json(sessions);
+  } catch (err) {
+    console.error('[/v1/sessions] list error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+app.post('/v1/sessions', authenticate, (req, res) => {
+  try {
+    const session = sessionsRepo.createSession({ name: req.body?.name, config: req.body?.config });
+    res.json(session);
+  } catch (err) {
+    console.error('[/v1/sessions] create error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+app.get('/v1/sessions/:id', authenticate, (req, res) => {
+  try {
+    const session = sessionsRepo.getSession(req.params.id);
+    if (!session) {
+      return res.status(404).json({ error: { message: 'Session not found', type: 'not_found' } });
+    }
+    res.json(session);
+  } catch (err) {
+    console.error('[/v1/sessions/:id] get error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+app.put('/v1/sessions/:id', authenticate, (req, res) => {
+  try {
+    const updated = sessionsRepo.updateSession(req.params.id, {
+      name: req.body?.name,
+      pinned: req.body?.pinned,
+      config: req.body?.config,
+    });
+    if (!updated) {
+      return res.status(404).json({ error: { message: 'Session not found', type: 'not_found' } });
+    }
+    res.json(updated);
+  } catch (err) {
+    console.error('[/v1/sessions/:id] put error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+app.delete('/v1/sessions/:id', authenticate, (req, res) => {
+  try {
+    const deleted = sessionsRepo.deleteSession(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: { message: 'Session not found', type: 'not_found' } });
+    }
+    res.json({ deleted: true, id: req.params.id });
+  } catch (err) {
+    console.error('[/v1/sessions/:id] delete error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
   }
 });
 

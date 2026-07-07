@@ -445,6 +445,7 @@ a{color:var(--accent-1);text-decoration:none}
 
 <script>
 const APP_KEY = 'trae_api_studio';
+const MESSAGES_KEY = 'trae_api_studio_messages';
 let state = {
   sessions: [],
   activeSessionId: null,
@@ -464,51 +465,145 @@ let state = {
   agentAbortController: null,
 };
 
-function loadState() {
+// ===== Server API helpers (Phase 1: Web Portal v2) =====
+function apiBase() {
+  return (state.config.apiBase || '').replace(/\/$/, '');
+}
+function apiHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + (state.config.apiKey || ''),
+  };
+}
+async function apiGet(p) {
+  const r = await fetch(apiBase() + p, { headers: apiHeaders() });
+  return { status: r.status, body: r.status === 204 ? null : await r.json().catch(() => null) };
+}
+async function apiPost(p, body) {
+  const r = await fetch(apiBase() + p, {
+    method: 'POST', headers: apiHeaders(), body: JSON.stringify(body || {}),
+  });
+  return { status: r.status, body: r.status === 204 ? null : await r.json().catch(() => null) };
+}
+async function apiDelete(p) {
+  const r = await fetch(apiBase() + p, { method: 'DELETE', headers: apiHeaders() });
+  return { status: r.status, body: r.status === 204 ? null : await r.json().catch(() => null) };
+}
+
+// ===== Per-session message store (localStorage, migrated to server in Phase 2) =====
+let messagesStoreCache = null;
+function loadMessagesStore() {
+  if (messagesStoreCache) return messagesStoreCache;
+  try { messagesStoreCache = JSON.parse(localStorage.getItem(MESSAGES_KEY) || '{}'); }
+  catch { messagesStoreCache = {}; }
+  return messagesStoreCache;
+}
+function saveMessagesStore() {
+  if (!messagesStoreCache) return;
+  try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(messagesStoreCache)); }
+  catch (e) { console.error('Save messages error:', e); }
+}
+function getMessagesFor(sessionId) {
+  const store = loadMessagesStore();
+  if (!store[sessionId]) {
+    store[sessionId] = { chatMessages: [], agentMessages: [], history: [], workspaceDir: '', systemPrompt: '' };
+    saveMessagesStore();
+  }
+  return store[sessionId];
+}
+function setMessagesFor(sessionId, data) {
+  const store = loadMessagesStore();
+  store[sessionId] = data;
+  saveMessagesStore();
+}
+function removeMessagesFor(sessionId) {
+  const store = loadMessagesStore();
+  delete store[sessionId];
+  saveMessagesStore();
+}
+
+async function loadState() {
+  // Load global config from localStorage (apiBase, apiKey, model defaults)
   try {
     const saved = localStorage.getItem(APP_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      state.sessions = parsed.sessions || [];
-      state.activeSessionId = parsed.activeSessionId || null;
       if (parsed.config) Object.assign(state.config, parsed.config);
+      // Keep legacy activeSessionId as hint
+      if (parsed.activeSessionId) state.activeSessionId = parsed.activeSessionId;
     }
-  } catch (e) { console.error('Load state error:', e); }
-  if (state.sessions.length === 0) createSession(true);
-  else if (!state.activeSessionId) state.activeSessionId = state.sessions[0].id;
+  } catch (e) { console.error('Load config error:', e); }
+
+  // Fetch session list from server (source of truth for sessions)
+  try {
+    const res = await apiGet('/v1/sessions');
+    if (res.status === 200 && Array.isArray(res.body)) {
+      state.sessions = res.body;
+    } else {
+      console.warn('[loadState] /v1/sessions returned', res.status, '- falling back to empty session list');
+      state.sessions = [];
+    }
+  } catch (e) {
+    console.error('[loadState] server fetch failed:', e);
+    state.sessions = [];
+  }
+
+  if (state.sessions.length === 0) {
+    await createSession(true);
+  } else {
+    // Validate activeSessionId still exists; else pick first
+    if (!state.sessions.find(s => s.id === state.activeSessionId)) {
+      state.activeSessionId = state.sessions[0].id;
+    }
+  }
 }
 
 function saveState() {
+  // Save global config + activeSessionId; sessions live on server
   try {
     localStorage.setItem(APP_KEY, JSON.stringify({
-      sessions: state.sessions,
-      activeSessionId: state.activeSessionId,
       config: state.config,
+      activeSessionId: state.activeSessionId,
     }));
   } catch (e) { console.error('Save state error:', e); }
+  // Persist any in-memory message mutations
+  saveMessagesStore();
 }
 
 function getActiveSession() {
-  return state.sessions.find(s => s.id === state.activeSessionId);
+  const serverSess = state.sessions.find(s => s.id === state.activeSessionId);
+  if (!serverSess) return null;
+  // Return the store object (reference) with server fields merged in.
+  // Mutations to chatMessages/agentMessages/history/workspaceDir/systemPrompt
+  // persist because they mutate the store object directly.
+  const store = getMessagesFor(serverSess.id);
+  store.id = serverSess.id;
+  store.name = serverSess.name;
+  store.pinned = serverSess.pinned;
+  store.config = serverSess.config;
+  store.createdAt = serverSess.createdAt;
+  store.updatedAt = serverSess.updatedAt;
+  return store;
 }
 
-function createSession(silent) {
-  const id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-  const session = {
-    id,
-    name: 'Session ' + (state.sessions.length + 1),
-    workspaceDir: '',
-    systemPrompt: '',
-    chatMessages: [],
-    agentMessages: [],
-    history: [],
-    createdAt: Date.now(),
-  };
-  state.sessions.push(session);
-  state.activeSessionId = id;
-  renderSessions();
-  saveState();
-  if (!silent) toast('Session created', 'success');
+async function createSession(silent) {
+  try {
+    const res = await apiPost('/v1/sessions', {});
+    if (res.status !== 200 || !res.body || !res.body.id) {
+      throw new Error('Server returned ' + res.status);
+    }
+    const session = res.body;
+    state.sessions.push(session);
+    state.activeSessionId = session.id;
+    // Initialize empty message store
+    setMessagesFor(session.id, { chatMessages: [], agentMessages: [], history: [], workspaceDir: '', systemPrompt: '' });
+    renderSessions();
+    saveState();
+    if (!silent) toast('Session created', 'success');
+  } catch (e) {
+    console.error('[createSession] failed:', e);
+    toast('Failed to create session: ' + e.message, 'error');
+  }
 }
 
 function switchSession(id) {
@@ -525,14 +620,29 @@ function switchSession(id) {
   saveState();
 }
 
-function deleteSession(id) {
+async function deleteSession(id) {
+  try {
+    const res = await apiDelete('/v1/sessions/' + encodeURIComponent(id));
+    if (res.status !== 200) {
+      throw new Error('Server returned ' + res.status);
+    }
+  } catch (e) {
+    console.error('[deleteSession] failed:', e);
+    toast('Failed to delete session: ' + e.message, 'error');
+    return;
+  }
   state.sessions = state.sessions.filter(s => s.id !== id);
+  removeMessagesFor(id);
   if (state.activeSessionId === id) {
     state.activeSessionId = state.sessions[0]?.id || null;
-    if (!state.activeSessionId) createSession(true);
+    if (!state.activeSessionId) await createSession(true);
   }
   renderSessions();
+  renderChatMessages();
+  renderAgentMessages();
+  renderHistory();
   saveState();
+
 }
 
 function renderSessions() {
@@ -1256,8 +1366,8 @@ function syncUIFromConfig() {
   }
 }
 
-function init() {
-  loadState();
+async function init() {
+  await loadState();
   renderSessions();
   syncUIFromConfig();
   renderChatMessages();

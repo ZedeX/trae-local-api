@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node tests/test-all.js"
+    "test": "node tests/test-all.js",
+    "test:unit": "vitest run tests/server",
+    "test:e2e": "vitest run tests/e2e",
+    "test:vitest": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.98.0",
@@ -18,10 +21,12 @@
     "koffi": "^2.16.2",
     "node-fetch": "^2.7.0",
     "sharp": "^0.35.2",
-    "socks-proxy-agent": "^10.0.0"
+    "socks-proxy-agent": "^10.0.0",
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "playwright": "^1.61.0",
-    "puppeteer-core": "^25.1.0"
+    "puppeteer-core": "^25.1.0",
+    "vitest": "^4.1.10"
   }
 }
