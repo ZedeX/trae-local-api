@@ -6,6 +6,11 @@
 <title>Trae API Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- Phase 5: Markdown + code highlight + sanitization (CDN with SRI) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.6/purify.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -183,6 +188,28 @@ a{color:var(--accent-1);text-decoration:none}
 .badge-blue{background:rgba(9,132,227,.2);color:var(--blue-1)}
 
 .divider{height:1px;background:var(--border-0);margin:8px 0}
+
+/* Phase 5: Markdown rendering styles */
+.chat-msg.assistant .md-body{line-height:1.7;word-break:break-word}
+.chat-msg.assistant .md-body h1,.chat-msg.assistant .md-body h2,.chat-msg.assistant .md-body h3{margin:12px 0 6px;font-weight:600}
+.chat-msg.assistant .md-body h1{font-size:1.2em}
+.chat-msg.assistant .md-body h2{font-size:1.1em}
+.chat-msg.assistant .md-body h3{font-size:1.05em}
+.chat-msg.assistant .md-body p{margin:6px 0}
+.chat-msg.assistant .md-body ul,.chat-msg.assistant .md-body ol{margin:6px 0;padding-left:20px}
+.chat-msg.assistant .md-body li{margin:2px 0}
+.chat-msg.assistant .md-body blockquote{border-left:3px solid var(--accent-1);padding-left:10px;margin:6px 0;color:var(--text-1)}
+.chat-msg.assistant .md-body pre{background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-sm);padding:10px 12px;margin:8px 0;overflow-x:auto;position:relative;font-size:12px;line-height:1.5}
+.chat-msg.assistant .md-body pre code{font-family:var(--font-mono);background:none;padding:0;border:none;font-size:inherit}
+.chat-msg.assistant .md-body code{font-family:var(--font-mono);background:var(--bg-2);padding:1px 5px;border-radius:3px;font-size:0.9em}
+.chat-msg.assistant .md-body a{color:var(--accent-1)}
+.chat-msg.assistant .md-body table{border-collapse:collapse;margin:8px 0;width:100%}
+.chat-msg.assistant .md-body th,.chat-msg.assistant .md-body td{border:1px solid var(--border-0);padding:4px 8px;text-align:left}
+.chat-msg.assistant .md-body th{background:var(--bg-3)}
+.chat-msg.assistant .md-body img{max-width:100%;border-radius:var(--radius-sm)}
+.code-copy-btn{position:absolute;top:4px;right:4px;padding:2px 8px;border-radius:3px;font-size:10px;background:var(--bg-4);color:var(--text-2);cursor:pointer;border:1px solid var(--border-0);opacity:0;transition:opacity .15s}
+.chat-msg.assistant .md-body pre:hover .code-copy-btn{opacity:1}
+.code-copy-btn:hover{background:var(--accent-0);color:#fff}
 
 @media(max-width:900px){
   .sidebar,.panel-right{position:fixed;z-index:50;height:100vh;top:0}
@@ -707,11 +734,62 @@ function renderMessage(m) {
   const roleLabel = m.role === 'user' ? 'You' : m.role === 'tool' ? 'Tool' : m.role === 'system' ? 'System' : 'AI';
   let content = m.content || '';
   if (cls === 'assistant' || cls === 'tool') {
-    content = formatMarkdownish(content);
+    content = renderMarkdown(content);
   } else {
     content = esc(content);
   }
   return `<div class="chat-msg ${cls}"><div class="msg-role">${roleLabel}</div>${content}</div>`;
+}
+
+// Phase 5: Markdown rendering with highlight.js + DOMPurify
+let _markedReady = false;
+function initMarked() {
+  if (_markedReady || typeof marked === 'undefined') return;
+  _markedReady = true;
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+        try { return hljs.highlight(code, { language: lang }).value; } catch { /* fallback */ }
+      }
+      if (typeof hljs !== 'undefined') {
+        try { return hljs.highlightAuto(code).value; } catch { /* fallback */ }
+      }
+      return code;
+    },
+    breaks: true,
+    gfm: true,
+  });
+}
+
+function renderMarkdown(text) {
+  initMarked();
+  let html;
+  if (typeof marked !== 'undefined' && marked.parse) {
+    html = marked.parse(text || '');
+  } else {
+    // Fallback: basic rendering if CDN fails
+    html = formatMarkdownish(text);
+  }
+  // Sanitize with DOMPurify if available
+  if (typeof DOMPurify !== 'undefined') {
+    html = DOMPurify.sanitize(html);
+  }
+  // Wrap in md-body div for styling + add copy buttons to pre blocks
+  html = '<div class="md-body">' + html + '</div>';
+  // Add copy button to each <pre> block
+  html = html.replace(/<pre>/g, '<pre><button class="code-copy-btn" onclick="copyCodeBlock(this)">Copy</button>');
+  return html;
+}
+
+function copyCodeBlock(btn) {
+  const pre = btn.closest('pre');
+  if (!pre) return;
+  const code = pre.querySelector('code');
+  const text = code ? code.textContent : pre.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  });
 }
 
 function formatMarkdownish(text) {
