@@ -52,9 +52,20 @@ a{color:var(--accent-1);text-decoration:none}
 .session-item:hover{background:var(--bg-3)}
 .session-item.active{background:var(--accent-2);color:#fff}
 .session-item .session-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+.session-item .pin-icon{flex-shrink:0;opacity:0;transition:opacity var(--transition);cursor:pointer}
+.session-item:hover .pin-icon{opacity:1}
+.session-item .pin-icon.pinned{opacity:1}
 .session-item .session-close{opacity:0;transition:opacity var(--transition);color:var(--text-2);font-size:16px;line-height:1}
 .session-item:hover .session-close{opacity:1}
 .session-item .session-close:hover{color:var(--red-0)}
+.session-item .session-name[contenteditable="true"]{background:var(--bg-2);padding:2px 4px;border-radius:3px;outline:none;cursor:text}
+
+/* Phase 7: Delete confirmation modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}
+.modal-box{background:var(--bg-1);border:1px solid var(--border-0);border-radius:var(--radius-lg);padding:24px;max-width:400px;width:90%}
+.modal-box h3{margin:0 0 12px;font-size:16px}
+.modal-box p{margin:0 0 16px;color:var(--text-1);font-size:14px;line-height:1.5}
+.modal-box .modal-actions{display:flex;gap:8px;justify-content:flex-end}
 
 .history-item{padding:8px 12px;border-radius:var(--radius-sm);cursor:pointer;transition:background var(--transition);margin-bottom:2px}
 .history-item:hover{background:var(--bg-3)}
@@ -229,6 +240,9 @@ a{color:var(--accent-1);text-decoration:none}
     <div class="sidebar-header">
       <h2>Sessions</h2>
       <button class="btn btn-ghost btn-sm" onclick="createSession()" title="New Session">+ New</button>
+    </div>
+    <div style="padding:4px 8px">
+      <input type="text" id="sessionSearch" placeholder="Search sessions..." oninput="filterSessions(this.value)" style="width:100%;padding:5px 8px;background:var(--bg-2);border:1px solid var(--border-0);border-radius:var(--radius-sm);color:var(--text-0);font-size:12px">
     </div>
     <div class="sidebar-body" id="sessionList"></div>
     <div class="divider"></div>
@@ -428,6 +442,7 @@ const MESSAGES_KEY = 'trae_api_studio_messages';
 let state = {
   sessions: [],
   activeSessionId: null,
+  sessionFilter: '',
   config: {
     apiBase: 'http://localhost:19900',
     apiKey: 'trae-local-api-key',
@@ -656,13 +671,123 @@ async function deleteSession(id) {
 
 }
 
+// Phase 7: Session management UI
+let _renamingSessionId = null; // Guard against renderSessions() while editing
+let _clickTimer = null; // Distinguish single/double click
+
+/** Delayed click handler: if dblclick fires within 300ms, cancel the switchSession. */
+function handleSessionClick(id, event) {
+  if (_renamingSessionId) return; // Ignore clicks while renaming
+  if (_clickTimer) clearTimeout(_clickTimer);
+  _clickTimer = setTimeout(() => {
+    _clickTimer = null;
+    switchSession(id);
+  }, 250);
+}
+
+function filterSessions(query) {
+  state.sessionFilter = query;
+  renderSessions();
+}
+
+async function togglePin(id) {
+  const s = state.sessions.find(s => s.id === id);
+  if (!s) return;
+  const newPinned = !s.pinned;
+  try {
+    const res = await apiPut('/v1/sessions/' + encodeURIComponent(id), { pinned: newPinned });
+    if (res.status === 200) {
+      s.pinned = newPinned;
+      // Re-sort: pinned DESC, updated_at DESC
+      state.sessions.sort((a, b) => {
+        const pa = a.pinned ? 1 : 0, pb = b.pinned ? 1 : 0;
+        if (pb !== pa) return pb - pa;
+        return (b.updatedAt || b.updated_at || 0) - (a.updatedAt || a.updated_at || 0);
+      });
+      renderSessions();
+    }
+  } catch (e) {
+    toast('Failed to toggle pin: ' + e.message, 'error');
+  }
+}
+
+function startRenameSession(id, el) {
+  // Cancel any pending click timer (dblclick arrived first)
+  if (_clickTimer) { clearTimeout(_clickTimer); _clickTimer = null; }
+  _renamingSessionId = id;
+  el.contentEditable = 'true';
+  el.focus();
+  // Select all text
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  const finish = async () => {
+    el.contentEditable = 'false';
+    _renamingSessionId = null;
+    const newName = el.textContent.trim();
+    if (!newName) {
+      // Revert to old name
+      const s = state.sessions.find(s => s.id === id);
+      if (s) el.textContent = s.name;
+      renderSessions();
+      return;
+    }
+    try {
+      const res = await apiPut('/v1/sessions/' + encodeURIComponent(id), { name: newName });
+      if (res.status === 200) {
+        const s = state.sessions.find(s => s.id === id);
+        if (s) s.name = newName;
+        renderSessions();
+      }
+    } catch (e) {
+      toast('Failed to rename: ' + e.message, 'error');
+    }
+  };
+
+  el.onblur = finish;
+  el.onkeydown = (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+    if (e.key === 'Escape') {
+      const s = state.sessions.find(s => s.id === id);
+      if (s) el.textContent = s.name;
+      el.contentEditable = 'false';
+      _renamingSessionId = null;
+      renderSessions();
+    }
+  };
+}
+
+function confirmDeleteSession(id, name) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `
+    <div class="modal-box">
+      <h3>Delete Session</h3>
+      <p>Delete "${esc(name)}"? This cannot be undone.</p>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+        <button class="btn btn-primary" style="background:var(--red-0)" onclick="this.closest('.modal-overlay').remove();deleteSession('${id}')">Delete</button>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
 function renderSessions() {
+  if (_renamingSessionId) return; // Don't re-render while renaming
   const el = document.getElementById('sessionList');
-  el.innerHTML = state.sessions.map(s => `
-    <div class="session-item ${s.id === state.activeSessionId ? 'active' : ''}" onclick="switchSession('${s.id}')">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
-      <span class="session-name">${esc(s.name)}</span>
-      <span class="session-close" onclick="event.stopPropagation();deleteSession('${s.id}')">&times;</span>
+  const filtered = state.sessionFilter
+    ? state.sessions.filter(s => s.name.toLowerCase().includes(state.sessionFilter.toLowerCase()))
+    : state.sessions;
+  el.innerHTML = filtered.map(s => `
+    <div class="session-item ${s.id === state.activeSessionId ? 'active' : ''}" onclick="handleSessionClick('${s.id}', event)">
+      ${s.pinned ? '<svg class="pin-icon pinned" width="12" height="12" viewBox="0 0 24 24" fill="var(--orange-0)" stroke="var(--orange-0)" stroke-width="2" onclick="event.stopPropagation();togglePin(\'' + s.id + '\')" title="Unpin"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '<svg class="pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="event.stopPropagation();togglePin(\'' + s.id + '\')" title="Pin"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'}
+      <span class="session-name" ondblclick="event.stopPropagation();startRenameSession('${s.id}', this)">${esc(s.name)}</span>
+      <span class="session-close" onclick="event.stopPropagation();confirmDeleteSession('${s.id}', '${esc(s.name)}')">&times;</span>
     </div>
   `).join('');
 }

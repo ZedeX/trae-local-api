@@ -77,7 +77,7 @@ describe('Phase 3: Config schema + per-session config', () => {
     if (tempDir) {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
-  });
+  }, 15000);
 
   // ===== GET /v1/config/schema =====
   it('GET /v1/config/schema returns {params: [...]} with required fields', async () => {

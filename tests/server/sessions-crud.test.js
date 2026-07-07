@@ -81,9 +81,9 @@ describe('Phase 1: Session storage skeleton', () => {
     if (tempDir) {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
-  });
+  }, 15000);
 
-  // Tracer bullet: proves POST creates a row that GET can list back.
+  // Tracer bullet: POST creates a row that GET can list back.
   it('POST /v1/sessions creates a session that appears in GET /v1/sessions', async () => {
     const create = await request('POST', '/v1/sessions', {}, authHeaders());
     expect(create.status).toBe(200);

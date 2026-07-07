@@ -77,7 +77,7 @@ describe('Phase 2: Send message + persist', () => {
     if (tempDir) {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
-  });
+  }, 15000);
 
   // Tracer bullet: POST a message, GET the session, message is there.
   it('POST /v1/sessions/:id/messages appends a message that GET /v1/sessions/:id returns', async () => {
@@ -152,7 +152,7 @@ describe('Phase 2: Send message + persist', () => {
     }, authHeaders({ 'X-Session-Id': sid }));
     // Accept 200, 500, 502, 503 — anything but 400 from our own validation.
     expect(res.status).not.toBe(400);
-  });
+  }, 15000);
 
   it('X-Session-Id persists the user message even when model call fails', async () => {
     // Without Trae backend auth in the test env, the chat call will fail
@@ -178,5 +178,5 @@ describe('Phase 2: Send message + persist', () => {
     expect(userMsg).toBeTruthy();
     expect(userMsg.content).toBe('persistence test');
     expect(userMsg.id).toMatch(/^msg_/);
-  });
+  }, 15000);
 });

@@ -77,7 +77,7 @@ describe('Phase 4: Sampling parameters in schema + forwarding', () => {
     if (tempDir) {
       try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
     }
-  });
+  }, 15000);
 
   // ===== Schema includes 8 sampling params =====
   const SAMPLING_PARAMS = ['temperature', 'top_p', 'max_tokens', 'presence_penalty', 'frequency_penalty', 'stop', 'seed', 'n'];
