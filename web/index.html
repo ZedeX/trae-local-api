@@ -207,6 +207,8 @@ a{color:var(--accent-1);text-decoration:none}
 .chat-msg.assistant .md-body th,.chat-msg.assistant .md-body td{border:1px solid var(--border-0);padding:4px 8px;text-align:left}
 .chat-msg.assistant .md-body th{background:var(--bg-3)}
 .chat-msg.assistant .md-body img{max-width:100%;border-radius:var(--radius-sm)}
+.chat-msg.assistant .md-body .katex-display{margin:8px 0;overflow-x:auto}
+.chat-msg.assistant .md-body .katex-display>.katex{text-align:center}
 .code-copy-btn{position:absolute;top:4px;right:4px;padding:2px 8px;border-radius:3px;font-size:10px;background:var(--bg-4);color:var(--text-2);cursor:pointer;border:1px solid var(--border-0);opacity:0;transition:opacity .15s}
 .chat-msg.assistant .md-body pre:hover .code-copy-btn{opacity:1}
 .code-copy-btn:hover{background:var(--accent-0);color:#fff}
@@ -715,6 +717,8 @@ function renderChatMessages() {
     return;
   }
   el.innerHTML = sess.chatMessages.map(m => renderMessage(m)).join('');
+  // Phase 6: Lazy-load KaTeX for math-containing elements
+  el.querySelectorAll('[data-has-math="true"]').forEach(renderMathInMdBody);
   el.scrollTop = el.scrollHeight;
 }
 
@@ -726,6 +730,8 @@ function renderAgentMessages() {
     return;
   }
   el.innerHTML = sess.agentMessages.map(m => renderMessage(m)).join('');
+  // Phase 6: Lazy-load KaTeX for math-containing elements
+  el.querySelectorAll('[data-has-math="true"]').forEach(renderMathInMdBody);
   el.scrollTop = el.scrollHeight;
 }
 
@@ -742,6 +748,7 @@ function renderMessage(m) {
 }
 
 // Phase 5: Markdown rendering with highlight.js + DOMPurify
+// Phase 6: KaTeX lazy-load for math rendering
 let _markedReady = false;
 function initMarked() {
   if (_markedReady || typeof marked === 'undefined') return;
@@ -761,9 +768,79 @@ function initMarked() {
   });
 }
 
+// Phase 6: KaTeX lazy-load state
+let _katexLoaded = false;
+let _katexLoading = false;
+let _katexPendingEls = [];
+
+/** Check if text contains math delimiters $...$ or $$...$$ */
+function containsMath(text) {
+  if (!text) return false;
+  // Match $...$ (not \$) and $$...$$
+  return /(?<!\\)\$\$.+?\$\$(?!\$)|(?<!\\)\$.+?\$(?!\$)/s.test(text);
+}
+
+/** Dynamically load KaTeX CSS + JS + auto-render extension */
+function loadKaTeX() {
+  if (_katexLoaded || _katexLoading) return;
+  _katexLoading = true;
+
+  // KaTeX CSS
+  const katexCss = document.createElement('link');
+  katexCss.rel = 'stylesheet';
+  katexCss.href = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.css';
+  document.head.appendChild(katexCss);
+
+  // KaTeX core
+  const katexJs = document.createElement('script');
+  katexJs.src = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/katex.min.js';
+  katexJs.onload = () => {
+    // Load auto-render extension after core
+    const autoRender = document.createElement('script');
+    autoRender.src = 'https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.11/contrib/auto-render.min.js';
+    autoRender.onload = () => {
+      _katexLoaded = true;
+      _katexLoading = false;
+      // Re-render all pending elements
+      for (const el of _katexPendingEls) {
+        try { renderMathInElement(el, katexAutoRenderOptions()); } catch (e) { /* ignore */ }
+      }
+      _katexPendingEls = [];
+    };
+    document.head.appendChild(autoRender);
+  };
+  document.head.appendChild(katexJs);
+}
+
+/** KaTeX auto-render default options */
+function katexAutoRenderOptions() {
+  return {
+    delimiters: [
+      { left: '$$', right: '$$', display: true },
+      { left: '$', right: '$', display: false },
+      { left: '\\(', right: '\\)', display: false },
+      { left: '\\[', right: '\\]', display: true },
+    ],
+    throwOnError: false,
+  };
+}
+
+/** Render math in a DOM element. Loads KaTeX lazily if needed. */
+function renderMathInMdBody(el) {
+  if (!el) return;
+  if (_katexLoaded) {
+    try { renderMathInElement(el, katexAutoRenderOptions()); } catch (e) { /* ignore */ }
+  } else {
+    _katexPendingEls.push(el);
+    loadKaTeX();
+  }
+}
+
 function renderMarkdown(text) {
   initMarked();
   let html;
+  const hasMath = containsMath(text);
+
   if (typeof marked !== 'undefined' && marked.parse) {
     html = marked.parse(text || '');
   } else {
@@ -778,6 +855,10 @@ function renderMarkdown(text) {
   html = '<div class="md-body">' + html + '</div>';
   // Add copy button to each <pre> block
   html = html.replace(/<pre>/g, '<pre><button class="code-copy-btn" onclick="copyCodeBlock(this)">Copy</button>');
+  // Mark math-containing elements for lazy KaTeX rendering
+  if (hasMath) {
+    html = html.replace('<div class="md-body">', '<div class="md-body" data-has-math="true">');
+  }
   return html;
 }
 
