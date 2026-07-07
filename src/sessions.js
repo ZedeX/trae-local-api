@@ -95,13 +95,17 @@ function createSession(opts = {}) {
 /** List all sessions, sorted pinned DESC then updated_at DESC. */
 function listSessions(filter = {}) {
   const db = getDb();
-  let sql = 'SELECT id, name, pinned, config_json, created_at, updated_at FROM sessions';
+  // Phase 10: Include per-session token totals via subquery (avoids loading all messages)
+  let sql = `SELECT s.id, s.name, s.pinned, s.config_json, s.created_at, s.updated_at,
+    COALESCE(SUM(m.tokens_in), 0) AS total_tokens_in,
+    COALESCE(SUM(m.tokens_out), 0) AS total_tokens_out
+    FROM sessions s LEFT JOIN messages m ON m.session_id = s.id`;
   const params = [];
   if (filter.q) {
-    sql += ' WHERE LOWER(name) LIKE ?';
+    sql += ' WHERE LOWER(s.name) LIKE ?';
     params.push(`%${String(filter.q).toLowerCase()}%`);
   }
-  sql += ' ORDER BY pinned DESC, updated_at DESC';
+  sql += ' GROUP BY s.id ORDER BY s.pinned DESC, s.updated_at DESC';
   const rows = db.prepare(sql).all(...params);
   return rows.map(rowToSession);
 }
@@ -209,6 +213,8 @@ function rowToSession(row) {
     name: row.name,
     pinned: !!row.pinned,
     config: JSON.parse(row.config_json || '{}'),
+    totalTokensIn: row.total_tokens_in != null ? row.total_tokens_in : 0,
+    totalTokensOut: row.total_tokens_out != null ? row.total_tokens_out : 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

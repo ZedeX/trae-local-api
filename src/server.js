@@ -2127,6 +2127,32 @@ app.delete('/v1/sessions/:id/messages/:msgId', authenticate, (req, res) => {
   }
 });
 
+// Phase 10: Export session + messages as a single JSON download
+app.get('/v1/sessions/:id/export', authenticate, (req, res) => {
+  try {
+    const session = sessionsRepo.getSession(req.params.id);
+    if (!session) {
+      return res.status(404).json({ error: { message: 'Session not found', type: 'not_found' } });
+    }
+    const exportData = {
+      id: session.id,
+      name: session.name,
+      pinned: session.pinned,
+      config: session.config,
+      messages: session.messages || [],
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      exportedAt: Date.now(),
+    };
+    const filename = `session-${session.name || session.id}.json`.replace(/[^\w\-\.]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.json(exportData);
+  } catch (err) {
+    console.error('[/v1/sessions/:id/export] error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
 // ===== Config schema (Phase 3) =====
 // Source of truth for what the UI can configure.
 app.get('/v1/config/schema', authenticate, (req, res) => {

@@ -59,6 +59,18 @@ a{color:var(--accent-1);text-decoration:none}
 .session-item:hover .session-close{opacity:1}
 .session-item .session-close:hover{color:var(--red-0)}
 .session-item .session-name[contenteditable="true"]{background:var(--bg-2);padding:2px 4px;border-radius:3px;outline:none;cursor:text}
+.session-item .session-tokens{font-size:10px;font-family:var(--font-mono);color:var(--text-3);flex-shrink:0;white-space:nowrap}
+
+/* Phase 10: ☰ Menu overlay */
+.menu-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:900;display:none;animation:fadeIn .15s}
+.menu-overlay.open{display:block}
+.menu-panel{position:fixed;top:0;left:0;width:240px;height:100vh;background:var(--bg-1);border-right:1px solid var(--border-0);z-index:901;padding:16px 0;display:flex;flex-direction:column;animation:slideIn .2s ease}
+@keyframes slideIn{from{transform:translateX(-100%)}to{transform:translateX(0)}}
+.menu-panel .menu-item{display:flex;align-items:center;gap:10px;padding:10px 20px;color:var(--text-1);font-size:13px;cursor:pointer;transition:background var(--transition)}
+.menu-panel .menu-item:hover{background:var(--bg-3);color:var(--text-0)}
+.menu-panel .menu-item.active{color:var(--accent-1);background:var(--bg-2)}
+.menu-panel .menu-item svg{flex-shrink:0}
+.menu-panel .menu-divider{height:1px;background:var(--border-0);margin:8px 0}
 
 /* Phase 7: Delete confirmation modal */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000}
@@ -240,6 +252,29 @@ a{color:var(--accent-1);text-decoration:none}
 <div class="app">
   <div class="loading-bar" id="loadingBar"></div>
 
+  <!-- Phase 10: ☰ Menu overlay -->
+  <div class="menu-overlay" id="menuOverlay" onclick="closeMenu()"></div>
+  <div class="menu-panel" id="menuPanel" style="display:none">
+    <div style="padding:12px 20px 8px;font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px">Navigation</div>
+    <div class="menu-item active" data-menu="chat" onclick="openMenuTab('chat')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      Chat
+    </div>
+    <div class="menu-item" data-menu="api" onclick="openMenuTab('api')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+      API Tester
+    </div>
+    <div class="menu-item" data-menu="agent" onclick="openMenuTab('agent')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      Agent
+    </div>
+    <div class="menu-divider"></div>
+    <div class="menu-item" data-menu="files" onclick="openMenuTab('files')">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Files
+    </div>
+  </div>
+
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <h2>Sessions</h2>
@@ -265,8 +300,11 @@ a{color:var(--accent-1);text-decoration:none}
 
   <div class="main">
     <div class="main-header">
-      <button class="toggle-sidebar" onclick="toggleSidebar()" title="Toggle Sidebar">
+      <button class="toggle-sidebar" onclick="openMenu()" title="Menu" id="menuBtn">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+      </button>
+      <button class="toggle-sidebar" onclick="toggleSidebar()" title="Toggle Sidebar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" fill="none"/><path d="M9 3v18"/></svg>
       </button>
       <span class="brand">Trae API Studio</span>
       <span class="badge badge-purple" id="editionBadge"></span>
@@ -657,6 +695,17 @@ async function loadState() {
   }
 }
 
+// Phase 10: Refresh session list from server (updates token totals in sidebar)
+async function refreshSessionList() {
+  try {
+    const res = await apiGet('/v1/sessions');
+    if (res.status === 200 && Array.isArray(res.body)) {
+      state.sessions = res.body;
+      renderSessions();
+    }
+  } catch (e) { /* non-critical, ignore */ }
+}
+
 function saveState() {
   // Save global config + activeSessionId; sessions live on server
   try {
@@ -856,13 +905,18 @@ function renderSessions() {
   const filtered = state.sessionFilter
     ? state.sessions.filter(s => s.name.toLowerCase().includes(state.sessionFilter.toLowerCase()))
     : state.sessions;
-  el.innerHTML = filtered.map(s => `
+  el.innerHTML = filtered.map(s => {
+    const tIn = s.totalTokensIn || 0;
+    const tOut = s.totalTokensOut || 0;
+    const tokenHtml = (tIn || tOut) ? `<span class="session-tokens" title="Σ in: ${tIn} / out: ${tOut}">Σ${tIn}/${tOut}</span>` : '';
+    return `
     <div class="session-item ${s.id === state.activeSessionId ? 'active' : ''}" onclick="handleSessionClick('${s.id}', event)">
       ${s.pinned ? '<svg class="pin-icon pinned" width="12" height="12" viewBox="0 0 24 24" fill="var(--orange-0)" stroke="var(--orange-0)" stroke-width="2" onclick="event.stopPropagation();togglePin(\'' + s.id + '\')" title="Unpin"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '<svg class="pin-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" onclick="event.stopPropagation();togglePin(\'' + s.id + '\')" title="Pin"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'}
       <span class="session-name" ondblclick="event.stopPropagation();startRenameSession('${s.id}', this)">${esc(s.name)}</span>
+      ${tokenHtml}
       <span class="session-close" onclick="event.stopPropagation();confirmDeleteSession('${s.id}', '${esc(s.name)}')">&times;</span>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderHistory() {
@@ -1454,6 +1508,8 @@ async function sendChat() {
     document.getElementById('chatStopBtn').style.display = 'none';
     state.abortController = null;
     saveState();
+    // Phase 10: Refresh session list to update token totals in sidebar
+    refreshSessionList();
   }
 }
 
@@ -1855,16 +1911,22 @@ async function checkStatus() {
   }
 }
 
-function exportSession() {
+async function exportSession() {
   const sess = getActiveSession();
   if (!sess) return;
-  const blob = new Blob([JSON.stringify(sess, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = sess.name.replace(/\s+/g, '_') + '.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
-  toast('Session exported', 'success');
+  try {
+    const res = await apiGet('/v1/sessions/' + encodeURIComponent(sess.id) + '/export');
+    if (res.status !== 200) throw new Error('Export failed: ' + res.status);
+    const blob = new Blob([JSON.stringify(res.body, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (sess.name || sess.id).replace(/\s+/g, '_') + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Session exported', 'success');
+  } catch (e) {
+    toast('Export failed: ' + e.message, 'error');
+  }
 }
 
 function switchMainTab(tab) {
@@ -1879,6 +1941,30 @@ function switchApiTab(tab) {
 
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('collapsed');
+}
+
+// Phase 10: ☰ Menu overlay
+function openMenu() {
+  const overlay = document.getElementById('menuOverlay');
+  const panel = document.getElementById('menuPanel');
+  overlay.classList.add('open');
+  panel.style.display = '';
+  // Highlight the currently active tab
+  const activeTab = document.querySelector('#mainTabs .tab.active');
+  const currentTab = activeTab ? activeTab.dataset.tab : 'chat';
+  document.querySelectorAll('#menuPanel .menu-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.menu === currentTab);
+  });
+}
+
+function closeMenu() {
+  document.getElementById('menuOverlay').classList.remove('open');
+  document.getElementById('menuPanel').style.display = 'none';
+}
+
+function openMenuTab(tab) {
+  switchMainTab(tab);
+  closeMenu();
 }
 
 function toggleConfig() {
