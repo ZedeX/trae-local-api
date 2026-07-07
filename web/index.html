@@ -552,7 +552,76 @@ async function loadServerMessages(sessionId) {
   }
 }
 
+// Phase 9: Migrate old localStorage sessions to server
+async function migrateOldLocalStorage() {
+  // Skip if already migrated
+  if (localStorage.getItem('migration_v2_done')) return;
+
+  // Check if old data exists
+  const oldDataStr = localStorage.getItem(APP_KEY);
+  if (!oldDataStr) {
+    // No old data — mark as done to avoid repeated checks
+    localStorage.setItem('migration_v2_done', String(Date.now()));
+    return;
+  }
+
+  try {
+    const oldData = JSON.parse(oldDataStr);
+    const oldSessions = oldData.sessions || [];
+    if (oldSessions.length === 0) {
+      console.log('[migration] No old sessions to migrate');
+      localStorage.setItem('migration_v2_done', String(Date.now()));
+      return;
+    }
+
+    console.log(`[migration] Migrating ${oldSessions.length} sessions...`);
+
+    // Load old messages store
+    const oldMessagesStr = localStorage.getItem(MESSAGES_KEY);
+    const oldMessages = oldMessagesStr ? JSON.parse(oldMessagesStr) : {};
+
+    for (const oldSess of oldSessions) {
+      try {
+        // Create session on server
+        const res = await apiPost('/v1/sessions', { name: oldSess.name || 'Migrated Session' });
+        if (!res || !res.id) {
+          console.warn(`[migration] Failed to create session for ${oldSess.id}`);
+          continue;
+        }
+
+        // Migrate messages
+        const msgs = oldMessages[oldSess.id];
+        if (msgs && msgs.chatMessages) {
+          for (const m of msgs.chatMessages) {
+            try {
+              await apiPost(`/v1/sessions/${res.id}/messages`, {
+                role: m.role,
+                content: m.content,
+              });
+            } catch (e) {
+              console.warn(`[migration] Failed to migrate message in ${oldSess.id}:`, e);
+            }
+          }
+        }
+
+        console.log(`[migration] Session ${oldSess.id}: done (new: ${res.id})`);
+      } catch (e) {
+        console.warn(`[migration] Session ${oldSess.id} failed:`, e);
+      }
+    }
+
+    // Mark migration as done (keep old data as backup for 30 days)
+    localStorage.setItem('migration_v2_done', String(Date.now()));
+    console.log('[migration] Complete');
+  } catch (e) {
+    console.error('[migration] Migration error:', e);
+  }
+}
+
 async function loadState() {
+  // Phase 9: Migrate old localStorage sessions to server on first load
+  await migrateOldLocalStorage();
+
   // Load global config from localStorage (apiBase, apiKey, model defaults)
   try {
     const saved = localStorage.getItem(APP_KEY);
