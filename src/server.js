@@ -2111,6 +2111,22 @@ app.post('/v1/sessions/:id/messages', authenticate, (req, res) => {
   }
 });
 
+// Phase 8: Truncate messages from a given message onward.
+// Used for editing (truncate from old user message, then re-add edited version)
+// and regenerating (truncate last assistant message, then re-send).
+app.delete('/v1/sessions/:id/messages/:msgId', authenticate, (req, res) => {
+  try {
+    const count = sessionsRepo.truncateMessagesFrom(req.params.id, req.params.msgId);
+    if (count < 0) {
+      return res.status(404).json({ error: { message: 'Session or message not found', type: 'not_found' } });
+    }
+    res.json({ deleted: count, sessionId: req.params.id, messageId: req.params.msgId });
+  } catch (err) {
+    console.error('[/v1/sessions/:id/messages/:msgId] delete error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
 // ===== Config schema (Phase 3) =====
 // Source of truth for what the UI can configure.
 app.get('/v1/config/schema', authenticate, (req, res) => {

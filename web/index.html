@@ -148,7 +148,11 @@ a{color:var(--accent-1);text-decoration:none}
 .chat-msg.assistant{align-self:flex-start;background:var(--bg-3);color:var(--text-0);border-bottom-left-radius:4px}
 .chat-msg.system{align-self:center;background:var(--bg-4);color:var(--text-2);font-size:12px;padding:6px 12px;border-radius:var(--radius)}
 .chat-msg.tool{align-self:flex-start;background:rgba(9,132,227,.1);border:1px solid rgba(9,132,227,.3);color:var(--blue-1);font-size:12px;font-family:var(--font-mono);max-width:95%}
-.chat-msg .msg-role{font-size:10px;font-weight:600;text-transform:uppercase;margin-bottom:4px;opacity:.6}
+.chat-msg .msg-role{font-size:10px;font-weight:600;text-transform:uppercase;margin-bottom:4px;opacity:.6;display:flex;align-items:center;gap:6px}
+.msg-action{cursor:pointer;opacity:0;transition:opacity .15s;font-size:12px}
+.chat-msg:hover .msg-action{opacity:.7}
+.msg-action:hover{opacity:1!important}
+.token-badge{font-size:9px;font-weight:400;text-transform:none;opacity:.5;margin-left:auto;font-family:var(--font-mono)}
 .chat-input-area{padding:12px 16px;border-top:1px solid var(--border-0);background:var(--bg-1);display:flex;gap:8px;flex-shrink:0}
 .chat-input{flex:1;padding:10px 14px;border-radius:var(--radius-lg);background:var(--bg-2);color:var(--text-0);font-size:13px;border:1px solid var(--border-0);resize:none;max-height:120px;transition:border-color var(--transition)}
 .chat-input:focus{border-color:var(--accent-0)}
@@ -841,7 +845,7 @@ function renderChatMessages() {
     el.innerHTML = '<div class="empty-state"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><p>Start a conversation with the AI.</p></div>';
     return;
   }
-  el.innerHTML = sess.chatMessages.map(m => renderMessage(m)).join('');
+  el.innerHTML = sess.chatMessages.map((m, i) => renderMessage(m, i)).join('');
   // Phase 6: Lazy-load KaTeX for math-containing elements
   el.querySelectorAll('[data-has-math="true"]').forEach(renderMathInMdBody);
   el.scrollTop = el.scrollHeight;
@@ -860,7 +864,258 @@ function renderAgentMessages() {
   el.scrollTop = el.scrollHeight;
 }
 
-function renderMessage(m) {
+// Phase 8: Message edit + regenerate
+async function startEditMessage(idx) {
+  const sess = getActiveSession();
+  if (!sess || !sess.chatMessages) return;
+  const msg = sess.chatMessages[idx];
+  if (!msg || msg.role !== 'user') return;
+
+  // Count messages that will be truncated (from idx onward)
+  const truncateCount = sess.chatMessages.length - idx;
+
+  // If truncating more than 1 message (the user msg itself + assistant msg = 2), show confirm
+  if (truncateCount > 2) {
+    const confirmed = await showConfirmDialog(
+      'Edit Message',
+      `Discard ${truncateCount - 1} messages below this? This cannot be undone.`
+    );
+    if (!confirmed) return;
+  }
+
+  // Find the message element and replace content with textarea
+  const msgEl = document.querySelector(`.chat-msg[data-msg-idx="${idx}"]`);
+  if (!msgEl) return;
+
+  // Save original HTML for cancel
+  const originalHTML = msgEl.innerHTML;
+
+  // Find or create a content wrapper
+  let contentEl = msgEl.querySelector('.msg-content-wrap');
+  if (!contentEl) {
+    // User messages don't have a wrapper; wrap everything after .msg-role
+    contentEl = document.createElement('div');
+    contentEl.className = 'msg-content-wrap';
+    // Move all children except .msg-role into the wrapper
+    const children = Array.from(msgEl.childNodes);
+    for (const child of children) {
+      if (child.nodeType === 1 && child.classList.contains('msg-role')) continue;
+      contentEl.appendChild(child);
+    }
+    msgEl.appendChild(contentEl);
+  }
+
+  // Replace content with textarea
+  const textarea = document.createElement('textarea');
+  textarea.value = msg.content;
+  textarea.className = 'chat-input';
+  textarea.style.cssText = 'width:100%;min-height:60px;margin:4px 0';
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:6px;margin-top:4px';
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn btn-primary';
+  saveBtn.textContent = 'Save & Resend';
+  saveBtn.style.cssText = 'font-size:12px;padding:4px 12px';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-ghost';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'font-size:12px;padding:4px 12px';
+
+  btnRow.appendChild(saveBtn);
+  btnRow.appendChild(cancelBtn);
+
+  // Save original content for cancel
+  const originalContentHTML = contentEl.innerHTML;
+  contentEl.innerHTML = '';
+  contentEl.appendChild(textarea);
+  contentEl.appendChild(btnRow);
+  textarea.focus();
+
+  saveBtn.onclick = async () => {
+    const newText = textarea.value.trim();
+    if (!newText) return;
+
+    // Truncate messages from this index onward via API
+    const msgId = msg.id;
+    if (msgId) {
+      try {
+        await apiDelete(`/v1/sessions/${sess.id}/messages/${msgId}`);
+      } catch (e) {
+        toast('Failed to truncate messages: ' + e.message, 'error');
+        return;
+      }
+    }
+
+    // Update local state: truncate chatMessages from idx onward
+    sess.chatMessages = sess.chatMessages.slice(0, idx);
+
+    // Add edited user message
+    const newMsg = { role: 'user', content: newText };
+    sess.chatMessages.push(newMsg);
+
+    // Persist new user message
+    if (msgId) {
+      try {
+        const persisted = await apiPost(`/v1/sessions/${sess.id}/messages`, newMsg);
+        if (persisted.id) newMsg.id = persisted.id;
+      } catch (e) { /* best effort */ }
+    }
+
+    renderChatMessages();
+    saveState();
+
+    // Re-send chat with the edited message
+    await sendChatWithMessages(sess.chatMessages);
+  };
+
+  cancelBtn.onclick = () => {
+    contentEl.innerHTML = originalContentHTML;
+  };
+}
+
+async function regenerateMessage() {
+  const sess = getActiveSession();
+  if (!sess || !sess.chatMessages) return;
+
+  // Find the last assistant message
+  const lastIdx = sess.chatMessages.length - 1;
+  const lastMsg = sess.chatMessages[lastIdx];
+  if (!lastMsg || lastMsg.role !== 'assistant') return;
+
+  // Delete the last assistant message via API
+  if (lastMsg.id) {
+    try {
+      await apiDelete(`/v1/sessions/${sess.id}/messages/${lastMsg.id}`);
+    } catch (e) {
+      toast('Failed to delete message: ' + e.message, 'error');
+      return;
+    }
+  }
+
+  // Remove from local state
+  sess.chatMessages.pop();
+  renderChatMessages();
+  saveState();
+
+  // Re-send with the remaining messages
+  await sendChatWithMessages(sess.chatMessages);
+}
+
+/** Re-send chat with the given message history. */
+async function sendChatWithMessages(messages) {
+  const sess = getActiveSession();
+  if (!sess) return;
+
+  const config = sess.config || {};
+  const model = config.model || state.config.model || 'auto';
+  const isStream = config.stream !== false;
+
+  const apiMessages = messages
+    .filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'system')
+    .map(m => ({ role: m.role, content: m.content }));
+
+  if (apiMessages.length === 0) return;
+
+  // Add empty assistant message placeholder for streaming
+  sess.chatMessages.push({ role: 'assistant', content: '' });
+  renderChatMessages();
+
+  try {
+    const headers = apiHeaders();
+    headers['X-Session-Id'] = sess.id;
+
+    const body = {
+      model,
+      messages: apiMessages,
+      stream: isStream,
+    };
+
+    // Forward sampling params from session config
+    const samplingKeys = ['temperature', 'top_p', 'max_tokens', 'presence_penalty', 'frequency_penalty', 'stop', 'seed', 'n'];
+    for (const key of samplingKeys) {
+      if (config[key] != null) body[key] = config[key];
+    }
+
+    const res = await fetch(apiBase() + '/v1/chat/completions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+
+    if (isStream && res.body) {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let fullContent = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
+          if (!trimmed.startsWith('data: ')) continue;
+          try {
+            const chunk = JSON.parse(trimmed.slice(6));
+            const delta = chunk.choices?.[0]?.delta?.content || '';
+            if (delta) {
+              fullContent += delta;
+              sess.chatMessages[sess.chatMessages.length - 1].content = fullContent;
+              renderChatMessages();
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+    } else {
+      const data = await res.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      sess.chatMessages[sess.chatMessages.length - 1].content = content;
+      if (data.usage) {
+        sess.chatMessages[sess.chatMessages.length - 1].tokensIn = data.usage.prompt_tokens;
+        sess.chatMessages[sess.chatMessages.length - 1].tokensOut = data.usage.completion_tokens;
+      }
+    }
+  } catch (e) {
+    sess.chatMessages[sess.chatMessages.length - 1].content = 'Error: ' + e.message;
+    renderChatMessages();
+  }
+
+  saveState();
+}
+
+/** Show a confirm dialog. Returns true if confirmed. */
+function showConfirmDialog(title, message) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal-box">
+        <h3>${esc(title)}</h3>
+        <p>${esc(message)}</p>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="_modalCancel">Cancel</button>
+          <button class="btn btn-primary" style="background:var(--red-0)" id="_modalConfirm">Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#_modalCancel').onclick = () => { overlay.remove(); resolve(false); };
+    overlay.querySelector('#_modalConfirm').onclick = () => { overlay.remove(); resolve(true); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+  });
+}
+
+function renderMessage(m, idx) {
   const cls = m.role === 'user' ? 'user' : m.role === 'tool' ? 'tool' : m.role === 'system' ? 'system' : 'assistant';
   const roleLabel = m.role === 'user' ? 'You' : m.role === 'tool' ? 'Tool' : m.role === 'system' ? 'System' : 'AI';
   let content = m.content || '';
@@ -869,7 +1124,25 @@ function renderMessage(m) {
   } else {
     content = esc(content);
   }
-  return `<div class="chat-msg ${cls}"><div class="msg-role">${roleLabel}</div>${content}</div>`;
+
+  // Phase 8: Action buttons + token badge
+  let actions = '';
+  const sess = getActiveSession();
+  const isLast = sess && sess.chatMessages && idx === sess.chatMessages.length - 1;
+
+  if (cls === 'user') {
+    actions = `<span class="msg-action" onclick="startEditMessage(${idx})" title="Edit">✏️</span>`;
+  }
+  if (cls === 'assistant' && isLast) {
+    actions = `<span class="msg-action" onclick="regenerateMessage()" title="Regenerate">🔄</span>`;
+  }
+
+  let tokenBadge = '';
+  if (cls === 'assistant' && (m.tokensIn || m.tokensOut)) {
+    tokenBadge = `<span class="token-badge">in: ${m.tokensIn || 0} / out: ${m.tokensOut || 0}</span>`;
+  }
+
+  return `<div class="chat-msg ${cls}" data-msg-idx="${idx}"><div class="msg-role">${roleLabel}${tokenBadge}${actions}</div>${content}</div>`;
 }
 
 // Phase 5: Markdown rendering with highlight.js + DOMPurify

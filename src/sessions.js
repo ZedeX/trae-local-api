@@ -153,6 +153,34 @@ function getMessages(sessionId) {
   return rows.map(rowToMessage);
 }
 
+/**
+ * Phase 8: Truncate messages from a given message ID onward.
+ * Deletes the specified message and all messages created after it.
+ * Returns the count of deleted messages, or -1 if session/message not found.
+ */
+function truncateMessagesFrom(sessionId, messageId) {
+  const db = getDb();
+  // Verify session exists
+  const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+  if (!session) return -1;
+
+  // Find the target message's created_at
+  const target = db.prepare(
+    'SELECT id, created_at FROM messages WHERE id = ? AND session_id = ?'
+  ).get(messageId, sessionId);
+  if (!target) return -1;
+
+  // Delete the target message and all messages created at or after it
+  const result = db.prepare(
+    'DELETE FROM messages WHERE session_id = ? AND created_at >= ?'
+  ).run(sessionId, target.created_at);
+
+  // Bump session updated_at
+  db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(Date.now(), sessionId);
+
+  return result.changes;
+}
+
 function updateSession(id, patch = {}) {
   const db = getDb();
   const existing = getSession(id);
@@ -215,6 +243,7 @@ module.exports = {
   deleteSession,
   addMessage,
   getMessages,
+  truncateMessagesFrom,
   setGlobalDefaults,
   _resetForTest,
 };
