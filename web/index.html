@@ -522,6 +522,38 @@ function removeMessagesFor(sessionId) {
   saveMessagesStore();
 }
 
+// ===== Phase 2: Server-side chat message persistence =====
+// Chat messages live on the server (GET /v1/sessions/:id returns messages[]).
+// agentMessages, history, workspaceDir, systemPrompt stay in localStorage
+// (UI-only state). On session switch we replace chatMessages with the server
+// snapshot. Migration of legacy localStorage chat messages is deferred to
+// Phase 9 (see plans/web-portal-v2.md).
+async function loadServerMessages(sessionId) {
+  if (!sessionId) return;
+  try {
+    const res = await apiGet('/v1/sessions/' + encodeURIComponent(sessionId));
+    if (res.status === 200 && res.body && Array.isArray(res.body.messages)) {
+      const store = getMessagesFor(sessionId);
+      store.chatMessages = res.body.messages.map(m => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        tokensIn: m.tokensIn,
+        tokensOut: m.tokensOut,
+        createdAt: m.createdAt,
+      }));
+      // Sync server-side config back into the in-memory session list
+      if (res.body.config) {
+        const serverSess = state.sessions.find(s => s.id === sessionId);
+        if (serverSess) serverSess.config = res.body.config;
+      }
+      saveMessagesStore();
+    }
+  } catch (e) {
+    console.error('[loadServerMessages] failed for', sessionId, e);
+  }
+}
+
 async function loadState() {
   // Load global config from localStorage (apiBase, apiKey, model defaults)
   try {
@@ -606,9 +638,11 @@ async function createSession(silent) {
   }
 }
 
-function switchSession(id) {
+async function switchSession(id) {
   state.activeSessionId = id;
   renderSessions();
+  // Load chat messages from server before rendering (Phase 2)
+  await loadServerMessages(id);
   renderChatMessages();
   renderAgentMessages();
   renderHistory();
@@ -777,7 +811,11 @@ async function sendChat() {
     const startTime = Date.now();
     const resp = await fetch(state.config.apiBase + '/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.config.apiKey },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + state.config.apiKey,
+        'X-Session-Id': sess.id,
+      },
       body: JSON.stringify(body),
       signal: state.abortController.signal,
     });
@@ -1370,6 +1408,10 @@ async function init() {
   await loadState();
   renderSessions();
   syncUIFromConfig();
+  // Phase 2: load chat messages for the active session from server
+  if (state.activeSessionId) {
+    await loadServerMessages(state.activeSessionId);
+  }
   renderChatMessages();
   renderAgentMessages();
   renderHistory();

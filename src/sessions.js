@@ -32,6 +32,8 @@ function getDb() {
   dbInstance = new DatabaseSync(dbPath);
   // WAL mode for concurrent read/write (no-op for :memory:)
   try { dbInstance.exec('PRAGMA journal_mode = WAL;'); } catch { /* :memory: ignores */ }
+  // FK ON DELETE CASCADE requires foreign_keys pragma (off by default in sqlite)
+  try { dbInstance.exec('PRAGMA foreign_keys = ON;'); } catch { /* ignore */ }
   dbInstance.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -43,6 +45,19 @@ function getDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_sessions_pinned_updated_at
       ON sessions(pinned, updated_at);
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tokens_in INTEGER NOT NULL DEFAULT 0,
+      tokens_out INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_session_created
+      ON messages(session_id, created_at);
   `);
   return dbInstance;
 }
@@ -86,7 +101,46 @@ function getSession(id) {
   const row = db.prepare(
     'SELECT id, name, pinned, config_json, created_at, updated_at FROM sessions WHERE id = ?'
   ).get(id);
-  return row ? rowToSession(row) : null;
+  if (!row) return null;
+  const session = rowToSession(row);
+  session.messages = getMessages(id);
+  return session;
+}
+
+/** Append a message to a session. Returns the message object or null if session missing. */
+function addMessage(sessionId, { role, content, tokensIn = 0, tokensOut = 0 } = {}) {
+  const db = getDb();
+  // Lightweight existence check (avoid loading all messages just to validate session)
+  const existing = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
+  if (!existing) return null;
+  if (!role || typeof role !== 'string') throw new Error('role is required');
+  if (content == null) content = '';
+  if (typeof content !== 'string') content = String(content);
+  const id = `msg_${ulid()}`;
+  const now = Date.now();
+  db.prepare(
+    'INSERT INTO messages(id, session_id, role, content, tokens_in, tokens_out, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, sessionId, role, content, tokensIn || 0, tokensOut || 0, now);
+  // Bump session.updated_at so the session sorts to top of sidebar
+  db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(now, sessionId);
+  return {
+    id,
+    sessionId,
+    role,
+    content,
+    tokensIn: tokensIn || 0,
+    tokensOut: tokensOut || 0,
+    createdAt: now,
+  };
+}
+
+/** List messages for a session, sorted by created_at ASC. */
+function getMessages(sessionId) {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT id, session_id, role, content, tokens_in, tokens_out, created_at FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+  ).all(sessionId);
+  return rows.map(rowToMessage);
 }
 
 function updateSession(id, patch = {}) {
@@ -122,6 +176,18 @@ function rowToSession(row) {
   };
 }
 
+function rowToMessage(row) {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    role: row.role,
+    content: row.content,
+    tokensIn: row.tokens_in,
+    tokensOut: row.tokens_out,
+    createdAt: row.created_at,
+  };
+}
+
 /** Reset instance — for tests only. */
 function _resetForTest() {
   if (dbInstance) {
@@ -137,5 +203,7 @@ module.exports = {
   getSession,
   updateSession,
   deleteSession,
+  addMessage,
+  getMessages,
   _resetForTest,
 };

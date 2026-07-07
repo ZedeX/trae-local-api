@@ -143,18 +143,26 @@ app.get('/v1/models', authenticate, (req, res) => {
   res.json(createOpenAIModels([...models, ...functions]));
 });
 
-function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveToPath, logId) {
+function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveToPath, logId, onComplete) {
   let buffer = '';
   let currentEventName = '';
   let fullContent = '';
   let fullReasoning = '';
   let tokenUsage = null;
   let llmFinalized = false;
+  let persisted = false;
 
   const finalizeLlmLog = () => {
     if (llmFinalized) return;
     llmFinalized = true;
     if (logId) trafficLogger.finalizeLog(logId, { fullContent, fullReasoning, tokenUsage });
+  };
+
+  const persistOnce = () => {
+    if (persisted || !onComplete) return;
+    persisted = true;
+    try { onComplete(fullContent, fullReasoning, tokenUsage); }
+    catch (e) { console.error('[persist] onComplete error:', e); }
   };
 
   responseBody.on('data', (chunk) => {
@@ -210,6 +218,11 @@ function handleLlmUtilsStream(responseBody, res, completionId, modelName, saveTo
               if (!res.writableEnded) res.write(`data: ${JSON.stringify(errChunk)}\n\n`);
             }
           }
+
+          // Persist assistant message BEFORE res.end() so an abort after
+          // 'done' but before flush still has the row (grill-me G2: only on
+          // natural completion).
+          persistOnce();
 
           if (!res.writableEnded) {
             const doneChunk = createOpenAIStreamChunk(completionId, modelName, {}, parsed.finish_reason || 'stop');
@@ -356,6 +369,41 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
       }
     }
 
+    // ===== Phase 2: Session persistence via X-Session-Id header =====
+    // Best-effort: if the header points to a valid session, persist the last
+    // user message now (before the model call) and register an assistant
+    // persistence callback to fire on natural stream completion.
+    // On abort/error the assistant row is NOT created (grill-me G2).
+    const sessionId = req.headers['x-session-id'];
+    let persistAssistant = null;
+    if (sessionId && typeof sessionId === 'string') {
+      try {
+        const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+        if (lastUser && lastUser.content != null) {
+          const userContent = typeof lastUser.content === 'string'
+            ? lastUser.content
+            : JSON.stringify(lastUser.content);
+          const userMsg = sessionsRepo.addMessage(sessionId, { role: 'user', content: userContent });
+          if (userMsg) {
+            persistAssistant = (content, reasoning, tokenUsage) => {
+              const fullContent = reasoning
+                ? `[Thinking...]\n${reasoning}\n\n${content}`
+                : content;
+              sessionsRepo.addMessage(sessionId, {
+                role: 'assistant',
+                content: fullContent,
+                tokensIn: (tokenUsage && tokenUsage.prompt_tokens) || 0,
+                tokensOut: (tokenUsage && tokenUsage.completion_tokens) || 0,
+              });
+            };
+          }
+        }
+      } catch (persistErr) {
+        console.error('[persist] user message failed:', persistErr);
+        // Persistence is best-effort; do not fail the chat request.
+      }
+    }
+
     const authInfo = await refreshTokenIfNeeded();
     if (isTokenExpired(authInfo)) {
       return res.status(401).json({ error: { message: 'Trae token expired. Please restart Trae IDE to refresh.', type: 'auth_error' } });
@@ -380,11 +428,14 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
         const result = await llmUtilsChat(messages, modelName, true, options);
 
         if (result.body) {
-          handleLlmUtilsStream(result.body, res, completionId, modelName, saveToPath, result.logId);
+          handleLlmUtilsStream(result.body, res, completionId, modelName, saveToPath, result.logId, persistAssistant);
           req.on('close', () => {
             if (result.body && result.body.destroy) result.body.destroy();
           });
         } else {
+          if (persistAssistant) {
+            try { persistAssistant('', '', null); } catch (e) { console.error('[persist] assistant (empty body) failed:', e); }
+          }
           const doneChunk = createOpenAIStreamChunk(completionId, modelName, {}, 'stop');
           res.write(`data: ${JSON.stringify(doneChunk)}\n\n`);
           res.write('data: [DONE]\n\n');
@@ -511,6 +562,11 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
           }
         }
 
+        if (persistAssistant) {
+          try { persistAssistant(fullContent, fullReasoning, tokenUsage); }
+          catch (e) { console.error('[persist] assistant (non-stream) failed:', e); }
+        }
+
         res.json(response);
       } catch (llmErr) {
         console.log(`[llmUtilsChat] non-stream failed: ${llmErr.message}, falling back`);
@@ -578,6 +634,11 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
           } catch (agentErr) {
             throw new Error(`All endpoints failed: [llm] ${llmErr.message} [chat] ${chatErr.message} [agent] ${agentErr.message}`);
           }
+        }
+
+        if (persistAssistant) {
+          try { persistAssistant(content, '', null); }
+          catch (e) { console.error('[persist] assistant (fallback) failed:', e); }
         }
 
         const response = createOpenAIChatCompletion(completionId, modelName, content, 'stop');
@@ -1993,6 +2054,26 @@ app.delete('/v1/sessions/:id', authenticate, (req, res) => {
     res.json({ deleted: true, id: req.params.id });
   } catch (err) {
     console.error('[/v1/sessions/:id] delete error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+// Manual message append (any role). Used for testing, system messages, or edits.
+// Chat persistence is handled by /v1/chat/completions with X-Session-Id header.
+app.post('/v1/sessions/:id/messages', authenticate, (req, res) => {
+  try {
+    const msg = sessionsRepo.addMessage(req.params.id, {
+      role: req.body?.role,
+      content: req.body?.content,
+      tokensIn: req.body?.tokensIn,
+      tokensOut: req.body?.tokensOut,
+    });
+    if (!msg) {
+      return res.status(404).json({ error: { message: 'Session not found', type: 'not_found' } });
+    }
+    res.json(msg);
+  } catch (err) {
+    console.error('[/v1/sessions/:id/messages] post error:', err);
     res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
   }
 });
