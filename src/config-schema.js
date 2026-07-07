@@ -78,6 +78,85 @@ const CONFIG_PARAMS = [
     advanced: false,
     description: 'Workspace directory for file operations',
   },
+  // ===== Phase 4: OpenAI sampling parameters =====
+  {
+    key: 'temperature',
+    type: 'number',
+    default: 1,
+    min: 0,
+    max: 2,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Controls randomness. Lower = more deterministic. Trae may not honor this parameter.',
+  },
+  {
+    key: 'top_p',
+    type: 'number',
+    default: 1,
+    min: 0,
+    max: 1,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Nucleus sampling threshold. Trae may not honor this parameter.',
+  },
+  {
+    key: 'max_tokens',
+    type: 'number',
+    default: 4096,
+    min: 1,
+    max: 128000,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Maximum tokens in the response. Trae may not honor this parameter.',
+  },
+  {
+    key: 'presence_penalty',
+    type: 'number',
+    default: 0,
+    min: -2,
+    max: 2,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Penalize new tokens that appear in the text so far. Trae may not honor this parameter.',
+  },
+  {
+    key: 'frequency_penalty',
+    type: 'number',
+    default: 0,
+    min: -2,
+    max: 2,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Penalize new tokens based on frequency in text so far. Trae may not honor this parameter.',
+  },
+  {
+    key: 'stop',
+    type: 'string',
+    default: '',
+    group: 'Sampling',
+    advanced: true,
+    description: 'Stop sequences (comma-separated). Trae may not honor this parameter.',
+  },
+  {
+    key: 'seed',
+    type: 'number',
+    default: 0,
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Random seed for reproducibility. 0 = not set. Trae may not honor this parameter.',
+  },
+  {
+    key: 'n',
+    type: 'number',
+    default: 1,
+    min: 1,
+    max: 10,
+    group: 'Sampling',
+    advanced: true,
+    description: 'Number of completions to generate. Trae may not honor this parameter.',
+  },
 ];
 
 /** Returns the full schema. */
@@ -114,7 +193,7 @@ function validateConfig(config) {
     } else if (p.type === 'boolean') {
       cleaned[p.key] = !!val;
     } else if (p.type === 'enum') {
-      cleaned[p.key] = (p.enum || []).includes(val) ? val : p.default;
+      cleaned[p.key] = (p.enum || []).includes(String(val)) ? val : p.default;
     } else {
       cleaned[p.key] = String(val);
     }

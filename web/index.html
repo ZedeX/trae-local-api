@@ -1259,6 +1259,15 @@ function toggleConfig() {
   document.getElementById('configPanel').classList.toggle('collapsed');
 }
 
+function toggleConfigSection(sectionId) {
+  const section = document.getElementById(sectionId);
+  const arrow = document.getElementById(sectionId + '_arrow');
+  if (!section) return;
+  const isHidden = section.style.display === 'none';
+  section.style.display = isHidden ? '' : 'none';
+  if (arrow) arrow.textContent = isHidden ? '▼' : '▶';
+}
+
 function addKvRow(containerId) {
   const container = document.getElementById(containerId);
   const row = document.createElement('div');
@@ -1396,11 +1405,24 @@ function renderDynamicConfig() {
 
   let html = '';
   for (const [groupName, params] of Object.entries(groups)) {
-    html += '<div class="config-section"><h3>' + esc(groupName) + '</h3>';
+    const hasAdvanced = params.some(p => p.advanced);
+    const allAdvanced = params.every(p => p.advanced);
+    // Groups where ALL params are advanced (like Sampling) start collapsed
+    const startCollapsed = allAdvanced;
+    const sectionId = 'cfg_section_' + groupName.replace(/\s+/g, '_');
+
+    html += '<div class="config-section">';
+    html += '<h3 style="cursor:pointer;display:flex;align-items:center;gap:6px" onclick="toggleConfigSection(\'' + sectionId + '\')">';
+    html += '<span style="font-size:10px;transition:transform .15s" id="' + sectionId + '_arrow">' + (startCollapsed ? '▶' : '▼') + '</span>';
+    html += esc(groupName);
+    html += '</h3>';
+    html += '<div id="' + sectionId + '" style="' + (startCollapsed ? 'display:none' : '') + '">';
+
     for (const p of params) {
       const val = sessionConfig[p.key] !== undefined ? sessionConfig[p.key] : p.default;
       const desc = p.description ? ' title="' + esc(p.description) + '"' : '';
-      html += '<div class="config-field"' + desc + '><label>' + esc(p.key.replace(/_/g, ' ')) + '</label>';
+      const advClass = p.advanced ? ' style="opacity:0.7"' : '';
+      html += '<div class="config-field"' + desc + advClass + '><label>' + esc(p.key.replace(/_/g, ' ')) + '</label>';
       if (p.type === 'enum') {
         html += '<select id="cfg_' + p.key + '">';
         for (const opt of (p.enum || [])) {
@@ -1424,7 +1446,7 @@ function renderDynamicConfig() {
       }
       html += '</div>';
     }
-    html += '</div>';
+    html += '</div></div>';
   }
   container.innerHTML = html;
 

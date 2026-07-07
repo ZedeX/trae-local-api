@@ -420,6 +420,34 @@ app.post('/v1/chat/completions', authenticate, async (req, res) => {
     if (workspace_dir) options.workspace_dir = workspace_dir;
     options.workspace = extractWorkspace(req);
 
+    // Phase 4: Forward sampling params from request body (explicit) or session config
+    const samplingKeys = ['temperature', 'top_p', 'max_tokens', 'presence_penalty', 'frequency_penalty', 'stop', 'seed', 'n'];
+    for (const key of samplingKeys) {
+      // Request body takes precedence over session config
+      if (req.body[key] !== undefined) {
+        options[key] = req.body[key];
+      } else if (sessionId && persistAssistant) {
+        // Session config was loaded via X-Session-Id; check if session has sampling overrides
+        try {
+          const sess = sessionsRepo.getSession(sessionId);
+          if (sess && sess.config && sess.config[key] !== undefined && sess.config[key] !== null) {
+            const schemaDefault = configSchema.getDefaults()[key];
+            // Only forward if the value differs from schema default
+            if (sess.config[key] !== schemaDefault) {
+              // Special handling: stop is stored as comma-separated string in config
+              if (key === 'stop' && typeof sess.config[key] === 'string' && sess.config[key]) {
+                options[key] = sess.config[key].split(',').map(s => s.trim()).filter(Boolean);
+              } else if (key === 'seed' && sess.config[key] === 0) {
+                // seed=0 means not set, skip
+              } else {
+                options[key] = sess.config[key];
+              }
+            }
+          }
+        } catch (e) { /* best-effort */ }
+      }
+    }
+
     if (isStream) {
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');

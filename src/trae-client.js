@@ -375,6 +375,30 @@ async function llmUtilsChat(messages, model, stream, options) {
       body.max_tokens = Math.min(options.max_tokens, MAX_TOKENS_LIMIT);
     }
 
+    // Phase 4: Forward OpenAI-standard sampling parameters to Trae backend.
+    // Trae may not honor all of these, but we forward them best-effort.
+    if (options?.temperature != null && typeof options.temperature === 'number') {
+      body.temperature = options.temperature;
+    }
+    if (options?.top_p != null && typeof options.top_p === 'number') {
+      body.top_p = options.top_p;
+    }
+    if (options?.presence_penalty != null && typeof options.presence_penalty === 'number') {
+      body.presence_penalty = options.presence_penalty;
+    }
+    if (options?.frequency_penalty != null && typeof options.frequency_penalty === 'number') {
+      body.frequency_penalty = options.frequency_penalty;
+    }
+    if (options?.stop) {
+      body.stop = Array.isArray(options.stop) ? options.stop : [String(options.stop)];
+    }
+    if (options?.seed != null && typeof options.seed === 'number' && options.seed !== 0) {
+      body.seed = options.seed;
+    }
+    if (options?.n != null && typeof options.n === 'number' && options.n > 1) {
+      body.n = options.n;
+    }
+
     const headers = buildStreamHeaders(authInfo, deviceIds, requestId);
 
     const endpoint = `${apiHost}/api/agent/v3/llm_utils_chat`;
