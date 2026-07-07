@@ -26,6 +26,7 @@ const { encrypt, decrypt, hashContent } = require('./crypto');
 const { v4: uuidv4 } = require('./uuid');
 const trafficLogger = require('./traffic-logger');
 const sessionsRepo = require('./sessions');
+const configSchema = require('./config-schema');
 
 const app = express();
 app.use(cors());
@@ -48,6 +49,10 @@ function getTruncationSettings() {
 }
 
 const pendingSyncFiles = [];
+
+// Global defaults for new sessions (overridable via PUT /v1/config/defaults)
+let globalDefaults = configSchema.getDefaults();
+sessionsRepo.setGlobalDefaults(globalDefaults);
 
 // 服务启动时间 (moved here to be available for /health and /v1/dashboard/status routes)
 const serverStartTime = Date.now();
@@ -2074,6 +2079,35 @@ app.post('/v1/sessions/:id/messages', authenticate, (req, res) => {
     res.json(msg);
   } catch (err) {
     console.error('[/v1/sessions/:id/messages] post error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+// ===== Config schema (Phase 3) =====
+// Source of truth for what the UI can configure.
+app.get('/v1/config/schema', authenticate, (req, res) => {
+  try {
+    res.json(configSchema.getSchema());
+  } catch (err) {
+    console.error('[/v1/config/schema] error:', err);
+    res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
+  }
+});
+
+// Global defaults — seed new sessions; user can edit via "Save as default".
+app.get('/v1/config/defaults', authenticate, (req, res) => {
+  try { res.json(globalDefaults); }
+  catch (err) { res.status(500).json({ error: { message: err.message, type: 'internal_error' } }); }
+});
+
+app.put('/v1/config/defaults', authenticate, (req, res) => {
+  try {
+    globalDefaults = configSchema.validateConfig(req.body || {});
+    // Also expose getDefaults/setDefaults so sessionsRepo can read them
+    sessionsRepo.setGlobalDefaults(globalDefaults);
+    res.json(globalDefaults);
+  } catch (err) {
+    console.error('[/v1/config/defaults] put error:', err);
     res.status(500).json({ error: { message: err.message, type: 'internal_error' } });
   }
 });

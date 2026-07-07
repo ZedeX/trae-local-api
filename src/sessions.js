@@ -62,13 +62,23 @@ function getDb() {
   return dbInstance;
 }
 
+// Global defaults — set by PUT /v1/config/defaults; used to seed new sessions
+let _globalDefaults = null;
+
+/** Called by server.js when global defaults are updated. */
+function setGlobalDefaults(defaults) {
+  _globalDefaults = defaults;
+}
+
 /** Create a new session. Server-generated id (grill-me G1). */
 function createSession(opts = {}) {
   const db = getDb();
   const id = `sess_${ulid()}`;
   const now = Date.now();
   const name = opts.name || `Session ${new Date(now).toLocaleString()}`;
-  const configJson = JSON.stringify(opts.config || {});
+  // Merge global defaults with session-specific config (session overrides)
+  const mergedConfig = { ...(_globalDefaults || {}), ...(opts.config || {}) };
+  const configJson = JSON.stringify(mergedConfig);
   db.prepare(
     'INSERT INTO sessions(id, name, pinned, config_json, created_at, updated_at) VALUES(?, ?, 0, ?, ?, ?)'
   ).run(id, name, configJson, now, now);
@@ -76,7 +86,7 @@ function createSession(opts = {}) {
     id,
     name,
     pinned: false,
-    config: opts.config || {},
+    config: mergedConfig,
     createdAt: now,
     updatedAt: now,
   };
@@ -205,5 +215,6 @@ module.exports = {
   deleteSession,
   addMessage,
   getMessages,
+  setGlobalDefaults,
   _resetForTest,
 };

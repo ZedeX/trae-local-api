@@ -369,62 +369,11 @@ a{color:var(--accent-1);text-decoration:none}
               <input id="cfgApiKey" type="password" value="trae-local-api-key" placeholder="trae-local-api-key">
             </div>
           </div>
-          <div class="config-section">
-            <h3>Model</h3>
-            <div class="config-field">
-              <label>Chat Model</label>
-              <select id="cfgModel"><option value="auto">auto</option></select>
-            </div>
-            <div class="config-field">
-              <label>Chat Function</label>
-              <select id="cfgFunction">
-                <option value="">Default</option>
-                <option value="inline_chat">inline_chat</option>
-                <option value="solo_coder">solo_coder</option>
-                <option value="chat_v3">chat_v3</option>
-                <option value="builder_v3">builder_v3</option>
-              </select>
-            </div>
-            <div class="config-field">
-              <label>Stream</label>
-              <select id="cfgStream">
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-            </div>
-          </div>
+          <!-- Dynamic config sections rendered from server schema (Phase 3) -->
+          <div id="dynamicConfigSections"></div>
           <div class="config-section">
             <h3>Agent Tools</h3>
             <div id="toolTags" style="display:flex;flex-wrap:wrap;gap:4px"></div>
-            <div class="config-field" style="margin-top:8px">
-              <label>Max Tool Rounds</label>
-              <input id="cfgMaxRounds" type="number" value="8" min="1" max="20">
-            </div>
-          </div>
-          <div class="config-section">
-            <h3>Auto-Continue</h3>
-            <div class="config-field">
-              <label>Auto-Continue</label>
-              <select id="cfgAutoContinue">
-                <option value="true">Enabled</option>
-                <option value="false">Disabled</option>
-              </select>
-            </div>
-            <div class="config-field">
-              <label>Max Continues</label>
-              <input id="cfgMaxContinues" type="number" value="5" min="1" max="20">
-            </div>
-          </div>
-          <div class="config-section">
-            <h3>Session</h3>
-            <div class="config-field">
-              <label>Workspace Dir</label>
-              <input id="cfgWorkspace" placeholder="Leave empty for default">
-            </div>
-            <div class="config-field">
-              <label>System Prompt</label>
-              <textarea class="code-editor" id="cfgSystemPrompt" placeholder="Optional system prompt..." style="min-height:80px;font-size:12px"></textarea>
-            </div>
           </div>
           <div class="config-section">
             <h3>Quick Actions</h3>
@@ -433,6 +382,7 @@ a{color:var(--accent-1);text-decoration:none}
               <button class="btn btn-ghost btn-sm" onclick="fetchTools()">Refresh Tools</button>
               <button class="btn btn-ghost btn-sm" onclick="checkStatus()">Check Status</button>
               <button class="btn btn-ghost btn-sm" onclick="exportSession()">Export Session</button>
+              <button class="btn btn-ghost btn-sm" onclick="saveAsDefault()">Save as Default</button>
             </div>
           </div>
         </div>
@@ -643,14 +593,12 @@ async function switchSession(id) {
   renderSessions();
   // Load chat messages from server before rendering (Phase 2)
   await loadServerMessages(id);
+  // Re-render dynamic config from session's config (Phase 3)
+  renderDynamicConfig();
+  syncUIFromConfig();
   renderChatMessages();
   renderAgentMessages();
   renderHistory();
-  const sess = getActiveSession();
-  if (sess) {
-    document.getElementById('cfgWorkspace').value = sess.workspaceDir || '';
-    document.getElementById('cfgSystemPrompt').value = sess.systemPrompt || '';
-  }
   saveState();
 }
 
@@ -790,12 +738,13 @@ async function sendChat() {
   renderChatMessages();
   saveState();
 
-  const isStream = state.config.stream;
-  const model = state.config.model || 'auto';
-  const funcName = document.getElementById('cfgFunction').value || undefined;
+  const isStream = sess.config ? sess.config.stream !== false : state.config.stream;
+  const model = (sess.config && sess.config.model) || state.config.model || 'auto';
+  const funcName = (sess.config && sess.config.function && sess.config.function !== 'default') ? sess.config.function : undefined;
 
   const messages = [];
-  if (sess.systemPrompt) messages.push({ role: 'system', content: sess.systemPrompt });
+  if (sess.config && sess.config.system_prompt) messages.push({ role: 'system', content: sess.config.system_prompt });
+  else if (sess.systemPrompt) messages.push({ role: 'system', content: sess.systemPrompt });
   messages.push(...sess.chatMessages.filter(m => m.role !== 'tool'));
 
   const body = { model, messages, stream: isStream };
@@ -901,18 +850,19 @@ async function sendAgent() {
   renderAgentMessages();
   saveState();
 
-  const isStream = state.config.stream;
-  const model = state.config.model || 'auto';
+  const isStream = sess.config ? sess.config.stream !== false : state.config.stream;
+  const model = (sess.config && sess.config.model) || state.config.model || 'auto';
   const messages = [];
-  if (sess.systemPrompt) messages.push({ role: 'system', content: sess.systemPrompt });
+  if (sess.config && sess.config.system_prompt) messages.push({ role: 'system', content: sess.config.system_prompt });
+  else if (sess.systemPrompt) messages.push({ role: 'system', content: sess.systemPrompt });
   messages.push(...sess.agentMessages.filter(m => m.role !== 'tool'));
 
   const body = {
     model,
     messages,
     stream: isStream,
-    max_tool_rounds: state.config.maxRounds || 8,
-    workspace_dir: sess.workspaceDir || undefined,
+    max_tool_rounds: (sess.config && sess.config.max_tool_rounds) || state.config.maxRounds || 8,
+    workspace_dir: (sess.config && sess.config.workspace_dir) || sess.workspaceDir || undefined,
   };
   if (state.config.selectedTools && state.config.selectedTools.length > 0) {
     body.tool_names = state.config.selectedTools;
@@ -1190,11 +1140,14 @@ async function fetchModels() {
     });
     const json = await resp.json();
     state.models = json.data || [];
-    const sel = document.getElementById('cfgModel');
-    const current = sel.value;
-    sel.innerHTML = '<option value="auto">auto</option>' +
-      state.models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
-    sel.value = current || state.config.model || 'auto';
+    // Update the model select dropdown if it exists (schema-driven id: cfg_model)
+    const sel = document.getElementById('cfg_model');
+    if (sel) {
+      const current = sel.value;
+      sel.innerHTML = '<option value="auto">auto</option>' +
+        state.models.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+      sel.value = current || (getActiveSession()?.config?.model) || 'auto';
+    }
     document.getElementById('modelInfo').textContent = state.models.length + ' models';
     toast('Models loaded: ' + state.models.length, 'success');
   } catch (e) {
@@ -1372,42 +1325,163 @@ function formatTime(ts) {
 }
 
 function syncConfigFromUI() {
+  // Connection section (static, not schema-driven)
   state.config.apiBase = document.getElementById('cfgApiBase').value.trim();
   state.config.apiKey = document.getElementById('cfgApiKey').value.trim();
-  state.config.model = document.getElementById('cfgModel').value;
-  state.config.stream = document.getElementById('cfgStream').value === 'true';
-  state.config.maxRounds = parseInt(document.getElementById('cfgMaxRounds').value) || 8;
-  state.config.autoContinue = document.getElementById('cfgAutoContinue').value === 'true';
-  state.config.maxContinues = parseInt(document.getElementById('cfgMaxContinues').value) || 5;
 
+  // Dynamic schema-driven fields: read values from rendered inputs
   const sess = getActiveSession();
-  if (sess) {
-    sess.workspaceDir = document.getElementById('cfgWorkspace').value.trim();
-    sess.systemPrompt = document.getElementById('cfgSystemPrompt').value;
+  if (sess && state.configSchema) {
+    const sessionConfig = {};
+    for (const p of state.configSchema) {
+      const el = document.getElementById('cfg_' + p.key);
+      if (!el) continue;
+      let val;
+      if (p.type === 'boolean') {
+        val = el.value === 'true';
+      } else if (p.type === 'number') {
+        val = parseFloat(el.value);
+        if (isNaN(val)) val = p.default;
+      } else {
+        val = el.value;
+      }
+      sessionConfig[p.key] = val;
+    }
+    // Merge into session config and persist to server
+    Object.assign(sess.config, sessionConfig);
+    // Also update the session list entry
+    const serverSess = state.sessions.find(s => s.id === state.activeSessionId);
+    if (serverSess) Object.assign(serverSess.config, sessionConfig);
+    // Persist to server (best-effort)
+    apiPost ? apiPut('/v1/sessions/' + encodeURIComponent(sess.id), { config: sess.config }).catch(e => console.error('[syncConfig]', e)) : null;
   }
   saveState();
 }
 
-function syncUIFromConfig() {
-  document.getElementById('cfgApiBase').value = state.config.apiBase;
-  document.getElementById('cfgApiKey').value = state.config.apiKey;
-  document.getElementById('cfgModel').value = state.config.model;
-  document.getElementById('cfgStream').value = state.config.stream ? 'true' : 'false';
-  document.getElementById('cfgMaxRounds').value = state.config.maxRounds;
-  document.getElementById('cfgAutoContinue').value = state.config.autoContinue ? 'true' : 'false';
-  document.getElementById('cfgMaxContinues').value = state.config.maxContinues || 5;
+async function apiPut(p, body) {
+  const r = await fetch(apiBase() + p, {
+    method: 'PUT', headers: apiHeaders(), body: JSON.stringify(body || {}),
+  });
+  return { status: r.status, body: r.status === 204 ? null : await r.json().catch(() => null) };
+}
+
+// ===== Phase 3: Dynamic config from schema =====
+let configSchemaParams = [];
+
+async function loadConfigSchema() {
+  try {
+    const res = await apiGet('/v1/config/schema');
+    if (res.status === 200 && Array.isArray(res.body.params)) {
+      configSchemaParams = res.body.params;
+      state.configSchema = configSchemaParams;
+      renderDynamicConfig();
+    }
+  } catch (e) { console.error('[loadConfigSchema] failed:', e); }
+}
+
+function renderDynamicConfig() {
+  const container = document.getElementById('dynamicConfigSections');
+  if (!container || !configSchemaParams.length) return;
+
+  // Group params by group
+  const groups = {};
+  for (const p of configSchemaParams) {
+    const g = p.group || 'General';
+    if (!groups[g]) groups[g] = [];
+    groups[g].push(p);
+  }
 
   const sess = getActiveSession();
-  if (sess) {
-    document.getElementById('cfgWorkspace').value = sess.workspaceDir || '';
-    document.getElementById('cfgSystemPrompt').value = sess.systemPrompt || '';
+  const sessionConfig = sess ? sess.config : {};
+
+  let html = '';
+  for (const [groupName, params] of Object.entries(groups)) {
+    html += '<div class="config-section"><h3>' + esc(groupName) + '</h3>';
+    for (const p of params) {
+      const val = sessionConfig[p.key] !== undefined ? sessionConfig[p.key] : p.default;
+      const desc = p.description ? ' title="' + esc(p.description) + '"' : '';
+      html += '<div class="config-field"' + desc + '><label>' + esc(p.key.replace(/_/g, ' ')) + '</label>';
+      if (p.type === 'enum') {
+        html += '<select id="cfg_' + p.key + '">';
+        for (const opt of (p.enum || [])) {
+          html += '<option value="' + esc(opt) + '"' + (opt == val ? ' selected' : '') + '>' + esc(opt) + '</option>';
+        }
+        html += '</select>';
+      } else if (p.type === 'boolean') {
+        html += '<select id="cfg_' + p.key + '">';
+        html += '<option value="true"' + (val ? ' selected' : '') + '>Yes</option>';
+        html += '<option value="false"' + (!val ? ' selected' : '') + '>No</option>';
+        html += '</select>';
+      } else if (p.type === 'number') {
+        const min = p.min != null ? ' min="' + p.min + '"' : '';
+        const max = p.max != null ? ' max="' + p.max + '"' : '';
+        const step = ' step="any"';
+        html += '<input id="cfg_' + p.key + '" type="number" value="' + esc(String(val)) + '"' + min + max + step + '>';
+      } else if (p.key === 'system_prompt') {
+        html += '<textarea class="code-editor" id="cfg_' + p.key + '" style="min-height:80px;font-size:12px" placeholder="' + esc(p.description || '') + '">' + esc(String(val)) + '</textarea>';
+      } else {
+        html += '<input id="cfg_' + p.key + '" value="' + esc(String(val)) + '" placeholder="' + esc(p.description || '') + '">';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+
+  // Attach change listeners to all dynamic fields
+  container.querySelectorAll('input,select,textarea').forEach(el => {
+    el.addEventListener('change', syncConfigFromUI);
+    el.addEventListener('input', debounce(syncConfigFromUI, 500));
+  });
+}
+
+function syncUIFromConfig() {
+  // Connection section
+  document.getElementById('cfgApiBase').value = state.config.apiBase;
+  document.getElementById('cfgApiKey').value = state.config.apiKey;
+
+  // Dynamic schema fields are re-rendered via renderDynamicConfig()
+  // which reads from session config. But we also need to update them
+  // when switching sessions without a full re-render.
+  const sess = getActiveSession();
+  if (sess && configSchemaParams.length) {
+    for (const p of configSchemaParams) {
+      const el = document.getElementById('cfg_' + p.key);
+      if (!el) continue;
+      const val = sess.config[p.key] !== undefined ? sess.config[p.key] : p.default;
+      if (p.type === 'boolean') {
+        el.value = val ? 'true' : 'false';
+      } else {
+        el.value = String(val);
+      }
+    }
+  }
+}
+
+async function saveAsDefault() {
+  const sess = getActiveSession();
+  if (!sess) { toast('No active session', 'error'); return; }
+  try {
+    const res = await apiPut('/v1/config/defaults', sess.config);
+    if (res.status === 200) {
+      toast('Defaults saved — new sessions will inherit these settings', 'success');
+    } else {
+      toast('Failed to save defaults: ' + res.status, 'error');
+    }
+  } catch (e) {
+    toast('Save defaults error: ' + e.message, 'error');
   }
 }
 
 async function init() {
   await loadState();
   renderSessions();
+
+  // Phase 3: load schema first so dynamic config fields exist before sync
+  await loadConfigSchema();
   syncUIFromConfig();
+  renderDynamicConfig();
+
   // Phase 2: load chat messages for the active session from server
   if (state.activeSessionId) {
     await loadServerMessages(state.activeSessionId);
@@ -1419,7 +1493,8 @@ async function init() {
   addKvRow('apiHeadersEditor');
   addKvRow('apiParamsEditor');
 
-  document.querySelectorAll('#cfgApiBase,#cfgApiKey,#cfgModel,#cfgStream,#cfgMaxRounds,#cfgAutoContinue,#cfgMaxContinues,#cfgWorkspace,#cfgSystemPrompt').forEach(el => {
+  // Connection section listeners
+  document.querySelectorAll('#cfgApiBase,#cfgApiKey').forEach(el => {
     el.addEventListener('change', syncConfigFromUI);
     el.addEventListener('input', debounce(syncConfigFromUI, 500));
   });
