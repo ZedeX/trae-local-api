@@ -239,7 +239,7 @@ function auth_status() {
     echo ""
     curl -s "$API_BASE/v1/status" -H "Authorization: Bearer $API_KEY"
     echo -e "\n\n[Testing Trae CN Decrypt Module]\n"
-    node -e "try{const d=require('./src/trae-decrypt');const r=d.decryptAuthData();console.log('Decrypt: OK');console.log('Edition:',r.host?'CN':'SG');console.log('User:',r.account||r.userId||'N/A');console.log('Token exp:',r.expiredAt||'N/A')}catch(e){console.log('Decrypt error:',e.message)}"
+    node -e "try{const d=require('./src/trae-decrypt');const r=d.decryptAuthData();console.log('Decrypt: OK');console.log('Edition:',r.edition === 'enterprise' ? 'Enterprise' : (r.host ? 'CN' : 'SG'));console.log('User:',r.account||r.userId||'N/A');console.log('Token exp:',r.expiredAt||'N/A')}catch(e){console.log('Decrypt error:',e.message)}"
     echo -e "\n\nPress Enter to continue..."
     read
 }
