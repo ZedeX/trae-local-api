@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { getTraeDataDir } = require('./paths');
 
 const HEADER_SIZE = 6;
 const RANDOM_BYTES_LEN = 32;
@@ -121,18 +121,14 @@ function decryptStorageValue(base64Value) {
 
 function getStorageJsonPath(dataDir) {
   if (!dataDir) {
-    dataDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
+    dataDir = getTraeDataDir();
   }
   return path.join(dataDir, 'User', 'globalStorage', 'storage.json');
 }
 
 function decryptAuthData(dataDir) {
   if (!dataDir) {
-    const cnPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json');
-    const sgPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae', 'User', 'globalStorage', 'storage.json');
-    if (fs.existsSync(cnPath)) dataDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN');
-    else if (fs.existsSync(sgPath)) dataDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
-    else throw new Error('No Trae data directory found');
+    dataDir = getTraeDataDir();
   }
 
   const storagePath = getStorageJsonPath(dataDir);
@@ -158,11 +154,7 @@ function decryptAuthData(dataDir) {
 
 function decryptAllEncryptedValues(dataDir) {
   if (!dataDir) {
-    const cnPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json');
-    const sgPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae', 'User', 'globalStorage', 'storage.json');
-    if (fs.existsSync(cnPath)) dataDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN');
-    else if (fs.existsSync(sgPath)) dataDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
-    else throw new Error('No Trae data directory found');
+    dataDir = getTraeDataDir();
   }
 
   const storagePath = getStorageJsonPath(dataDir);

@@ -10,6 +10,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+// Load .env so TRAE_CN_DATA_DIR (and other vars) are available when run standalone.
+require('dotenv').config();
+
 // Try to load better-sqlite3, fallback to a manual approach
 let dbLib = null;
 try {
@@ -20,10 +23,14 @@ try {
 
 const { getModelConfig, saveModelConfig, rebuildDerivedMaps } = require('../src/trae-client');
 const { getAuthInfo } = require('../src/auth');
+const { getTraeDataDir, getDefaultEdition } = require('../src/paths');
 
-// Trae CN data dir — support env override for non-default installations
-const TRAE_CN_DATA_DIR = process.env.TRAE_CN_DATA_DIR || path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN');
-const VSCDB_PATH = path.join(TRAE_CN_DATA_DIR, 'User', 'globalStorage', 'state.vscdb');
+// Trae data dir — resolved cross-platform via paths.js.
+// Edition comes from TRAE_EDITION env var (default 'cn'); the data dir itself can
+// be overridden via TRAE_CN_DATA_DIR / TRAE_SG_DATA_DIR / TRAE_DATA_DIR env vars.
+const TRAE_EDITION = getDefaultEdition();
+const TRAE_DATA_DIR = getTraeDataDir();
+const VSCDB_PATH = path.join(TRAE_DATA_DIR, 'User', 'globalStorage', 'state.vscdb');
 
 // Build tier mapping dynamically from model-config.json instead of hardcoding.
 // This ensures consistency: if model-config.json tiers change, the script picks them up.
@@ -88,12 +95,12 @@ else:
 async function main() {
   const doUpdate = process.argv.includes('--update');
 
-  console.log('[fetch-models-vscdb] Reading Trae CN state.vscdb cache...');
+  console.log(`[fetch-models-vscdb] Reading Trae ${TRAE_EDITION.toUpperCase()} state.vscdb cache...`);
   console.log(`  Path: ${VSCDB_PATH}`);
 
   if (!fs.existsSync(VSCDB_PATH)) {
     console.error(`[fetch-models-vscdb] ERROR: state.vscdb not found at ${VSCDB_PATH}`);
-    console.error('  Ensure Trae CN IDE is installed and has been opened at least once.');
+    console.error(`  Ensure Trae ${TRAE_EDITION.toUpperCase()} IDE is installed and has been opened at least once.`);
     process.exit(1);
   }
 
