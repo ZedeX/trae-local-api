@@ -1,26 +1,16 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('./uuid');
 const { decryptAuthData: decryptTcAuthData, isTcEncrypted } = require('./trae-decrypt');
-
-function getTraeDataDir() {
-  const envDir = process.env.TRAE_DATA_DIR;
-  if (envDir) return envDir;
-  const edition = detectEdition();
-  if (edition === 'cn') {
-    return path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN');
-  }
-  return path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
-}
+const { getTraeDataDir, getTraeInstallDir } = require('./paths');
 
 function detectEdition() {
   const envEdition = process.env.TRAE_EDITION;
   if (envEdition) return envEdition.toLowerCase();
 
-  const cnPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN', 'User', 'globalStorage', 'storage.json');
-  const sgPath = path.join(os.homedir(), 'AppData', 'Roaming', 'Trae', 'User', 'globalStorage', 'storage.json');
+  const cnPath = path.join(getTraeDataDir('cn'), 'User', 'globalStorage', 'storage.json');
+  const sgPath = path.join(getTraeDataDir('sg'), 'User', 'globalStorage', 'storage.json');
 
   const cnExists = fs.existsSync(cnPath);
   const sgExists = fs.existsSync(sgPath);
@@ -41,10 +31,7 @@ function detectEdition() {
 
 function getStorageJsonPath(edition) {
   const ed = edition || detectEdition();
-  const dataDir = ed === 'cn'
-    ? path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN')
-    : path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
-  return path.join(dataDir, 'User', 'globalStorage', 'storage.json');
+  return path.join(getTraeDataDir(ed), 'User', 'globalStorage', 'storage.json');
 }
 
 function readStorageJson() {
@@ -64,10 +51,7 @@ function isEncryptedAuthData(raw) {
 }
 
 function readStorageJsonByEdition(edition) {
-  const dataDir = edition === 'cn'
-    ? path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN')
-    : path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
-  const storagePath = path.join(dataDir, 'User', 'globalStorage', 'storage.json');
+  const storagePath = path.join(getTraeDataDir(edition), 'User', 'globalStorage', 'storage.json');
   if (!fs.existsSync(storagePath)) return null;
   const raw = fs.readFileSync(storagePath, 'utf-8');
   return JSON.parse(raw);
@@ -85,9 +69,7 @@ function getAuthInfo() {
 
   for (const ed of editions) {
     try {
-      const dataDir = ed === 'cn'
-        ? path.join(os.homedir(), 'AppData', 'Roaming', 'Trae CN')
-        : path.join(os.homedir(), 'AppData', 'Roaming', 'Trae');
+      const dataDir = getTraeDataDir(ed);
 
       try {
         const auth = decryptTcAuthData(dataDir);
@@ -400,10 +382,7 @@ function getIdeVersion() {
   // Try to read from Trae's manifest.json for accurate version
   try {
     const edition = detectEdition();
-    const baseDir = edition === 'cn'
-      ? path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Trae-CN')
-      : path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'Trae');
-    const manifestPath = path.join(baseDir, 'manifest.json');
+    const manifestPath = path.join(getTraeInstallDir(edition), 'manifest.json');
     if (fs.existsSync(manifestPath)) {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
       if (manifest.appVersion) {
